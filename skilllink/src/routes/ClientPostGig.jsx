@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { saveGigDraft } from '../services/firestoreClient'
+import { fetchGigById, upsertGigDraft } from '../services/firestoreClient'
 import { uploadGigThumbnail } from '../services/storageClient'
 
 const initialSkills = ['UI Design', 'Figma', 'Prototyping']
@@ -15,13 +16,14 @@ const initialForm = {
   requirements: '',
   budgetMin: '',
   budgetMax: '',
-  currency: '$',
   deadline: '',
   skillInput: '',
 }
 
 const ClientPostGig = () => {
   const { user } = useAuth()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const [formData, setFormData] = useState(initialForm)
   const [skills, setSkills] = useState(initialSkills)
   const [errors, setErrors] = useState({})
@@ -31,6 +33,71 @@ const ClientPostGig = () => {
   const [thumbnailAsset, setThumbnailAsset] = useState(null)
   const [thumbnailStatus, setThumbnailStatus] = useState('idle')
   const [thumbnailError, setThumbnailError] = useState('')
+  const [editingGigId, setEditingGigId] = useState(null)
+  const [loadingGig, setLoadingGig] = useState(false)
+
+  const gigIdFromRoute = useMemo(() => {
+    const queryGigId = searchParams.get('gigId')
+    const stateGigId = location.state?.gig?.id
+    return queryGigId || stateGigId || null
+  }, [location.state, searchParams])
+
+  useEffect(() => {
+    if (!gigIdFromRoute) return
+
+    setEditingGigId(gigIdFromRoute)
+    const hydrate = (gig) => {
+      if (!gig) return
+      setFormData({
+        title: gig.title || '',
+        description: gig.summary || gig.description || '',
+        projectOverview: gig.projectOverview || gig.description || '',
+        responsibilities: normalizeListOutput(gig.responsibilities),
+        requirements: normalizeListOutput(gig.requirements),
+        budgetMin: gig.budgetMin || '',
+        budgetMax: gig.budgetMax || '',
+        deadline: gig.deadline || gig.timeline || '',
+        skillInput: '',
+      })
+      const nextSkills = Array.isArray(gig.skills) && gig.skills.length ? gig.skills : Array.isArray(gig.tags) ? gig.tags : []
+      setSkills(nextSkills.length ? nextSkills : initialSkills)
+      if (gig.creative?.url || gig.thumbnail) {
+        setThumbnailAsset(
+          gig.creative?.url
+            ? gig.creative
+            : {
+                url: gig.thumbnail,
+                name: 'Gig creative',
+              },
+        )
+        setThumbnailStatus('ready')
+      }
+    }
+
+    if (location.state?.gig) {
+      hydrate(location.state.gig)
+    }
+
+    let active = true
+    setLoadingGig(true)
+    fetchGigById(gigIdFromRoute)
+      .then((gig) => {
+        if (!active) return
+        hydrate(gig)
+      })
+      .catch((error) => {
+        if (!active) return
+        setMessage(error.message || 'Unable to load gig details.')
+        setStatus('error')
+      })
+      .finally(() => {
+        if (active) setLoadingGig(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [gigIdFromRoute, location.state?.gig])
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -101,12 +168,6 @@ const ClientPostGig = () => {
     if (!skills.length) {
       nextErrors.skills = 'Select at least one skill.'
     }
-    if (!formData.budgetMin.trim()) {
-      nextErrors.budgetMin = 'Enter a minimum budget.'
-    }
-    if (!formData.budgetMax.trim()) {
-      nextErrors.budgetMax = 'Enter a maximum budget.'
-    }
     if (!formData.deadline.trim()) {
       nextErrors.deadline = 'Select a deadline.'
     }
@@ -132,7 +193,7 @@ const ClientPostGig = () => {
     const responsibilitiesList = normalizeListInput(formData.responsibilities)
     const requirementsList = normalizeListInput(formData.requirements)
 
-    return saveGigDraft(user.uid, {
+      return upsertGigDraft(user.uid, {
       title: formData.title.trim(),
       summary: formData.description.trim(),
       description: projectOverview,
@@ -141,7 +202,6 @@ const ClientPostGig = () => {
       tags: sanitizedSkills,
       budgetMin: formData.budgetMin,
       budgetMax: formData.budgetMax,
-      currency: formData.currency,
       timeline: formData.deadline,
       deadline: formData.deadline,
       responsibilities: responsibilitiesList,
@@ -149,11 +209,9 @@ const ClientPostGig = () => {
       thumbnail: thumbnailAsset?.url,
       creative: thumbnailAsset || null,
       status,
-      priceType: 'Fixed price',
-      priceRange: formatBudgetRangeLabel(formData.currency, formData.budgetMin, formData.budgetMax),
       client: buildClientSnapshot(user),
-      tokens: user?.tokenBalance ?? user?.tokens ?? 0,
-    })
+      
+    }, editingGigId)
   }
 
   const handleSaveDraft = async () => {
@@ -162,7 +220,7 @@ const ClientPostGig = () => {
     try {
       const saved = await persistGig({ status: 'Draft' })
       setStatus('success')
-      setMessage(`Draft for ${saved.title || 'this gig'} saved.`)
+      setMessage(`${editingGigId ? 'Updates for' : 'Draft for'} ${saved.title || 'this gig'} saved.`)
       setSavedAt(new Date())
     } catch (error) {
       setStatus('error')
@@ -179,14 +237,16 @@ const ClientPostGig = () => {
     try {
       const saved = await persistGig({ status: 'Open' })
       setStatus('success')
-      setMessage(`Gig ${saved.title || 'draft'} saved.`)
+      setMessage(`${editingGigId ? 'Gig updated' : 'Gig'} ${saved.title || 'draft'} saved.`)
       setSavedAt(new Date())
-      setFormData(initialForm)
-      setSkills(initialSkills)
-      setErrors({})
-      setThumbnailAsset(null)
-      setThumbnailStatus('idle')
-      setThumbnailError('')
+      if (!editingGigId) {
+        setFormData(initialForm)
+        setSkills(initialSkills)
+        setErrors({})
+        setThumbnailAsset(null)
+        setThumbnailStatus('idle')
+        setThumbnailError('')
+      }
     } catch (error) {
       setStatus('error')
       setMessage(error.message || 'Unable to save gig.')
@@ -213,18 +273,19 @@ const ClientPostGig = () => {
     <div className="post-gig-page">
       <section className="post-gig-intro">
         <p className="post-gig-hero-eyebrow">Client workspace</p>
-        <h1>Launch a new project brief</h1>
+        <h1>{editingGigId ? 'Edit gig brief' : 'Launch a new project brief'}</h1>
         <p>
           Bring your next engagement to life with a structured, guided workflow. Share context, scope, and guardrails so
           we can introduce the right experts in hours instead of weeks.
         </p>
       </section>
 
-      {message && (
-        <div className={`inline-alert ${status === 'success' ? 'inline-alert-success' : 'inline-alert-error'}`}>
-          <p>{message}</p>
+      {loadingGig && (
+        <div className="inline-alert">
+          <p>Loading gig details…</p>
         </div>
       )}
+
 
       <form className="post-gig-card" onSubmit={handleSubmit}>
           <section className="form-section">
@@ -290,7 +351,6 @@ const ClientPostGig = () => {
               onChange={handleChange}
               placeholder={'Ship dashboard UX flows\nStand up usability tests\nAlign with growth PM weekly'}
             />
-            <small className="field-helper">Each new line becomes a bullet in the freelancer view.</small>
             {errors.responsibilities && <p className="field-error">{errors.responsibilities}</p>}
           </section>
 
@@ -307,15 +367,14 @@ const ClientPostGig = () => {
               onChange={handleChange}
               placeholder={'5+ years in product design\nExpert Figma systems\nExperience shipping fintech or SaaS'}
             />
-            <small className="field-helper">Keep it concise—focus on the decisive qualifiers.</small>
             {errors.requirements && <p className="field-error">{errors.requirements}</p>}
           </section>
 
           <section className="form-section">
-            <div className="field-heading">
+            {/* <div className="field-heading">
               <h3>Ad Creative</h3>
               <p>Attach a hero image for your posting. This appears on freelancer opportunity cards.</p>
-            </div>
+            </div> */}
             <div className="creative-upload">
               {thumbnailAsset ? (
                 <div className="creative-preview">
@@ -377,39 +436,8 @@ const ClientPostGig = () => {
           </section>
 
           <section className="budget-grid">
-            <div>
-              <div className="field-heading">
-                <h3>Budget Range</h3>
-              </div>
-              <div className="budget-inputs">
-                <div className="currency-input">
-                  <span>{formData.currency}</span>
-                  <input
-                    type="number"
-                    name="budgetMin"
-                    value={formData.budgetMin}
-                    onChange={handleChange}
-                    placeholder="Min"
-                    min="0"
-                  />
-                </div>
-                <span className="budget-separator">to</span>
-                <div className="currency-input">
-                  <span>{formData.currency}</span>
-                  <input
-                    type="number"
-                    name="budgetMax"
-                    value={formData.budgetMax}
-                    onChange={handleChange}
-                    placeholder="Max"
-                    min="0"
-                  />
-                </div>
-              </div>
-              {(errors.budgetMin || errors.budgetMax) && (
-                <p className="field-error">{errors.budgetMin || errors.budgetMax}</p>
-              )}
-            </div>
+            {/* Budget inputs hidden — currency and ranges removed from UI */}
+          
             <div className="deadline-field">
               <div className="field-heading">
                 <h3>Project Deadline</h3>
@@ -431,11 +459,18 @@ const ClientPostGig = () => {
                 Save draft
               </button>
               <button type="submit" className="cta cta-primary" disabled={status === 'submitting'}>
-                {status === 'submitting' ? 'Saving...' : 'Post gig'}
+                {status === 'submitting' ? 'Saving...' : editingGigId ? 'Update gig' : 'Post gig'}
               </button>
             </div>
           </div>
       </form>
+      
+      {message && (
+        <div className={`inline-alert ${status === 'success' ? 'inline-alert-success' : 'inline-alert-error'}`}>
+          <p>{message}</p>
+        </div>
+      )}
+
     </div>
   )
 }
@@ -451,17 +486,15 @@ const normalizeListInput = (value = '') =>
     .map((item) => item.trim())
     .filter(Boolean)
 
-const formatBudgetRangeLabel = (currency, min, max) => {
-  const symbol = currency || '₦'
-  const formatPart = (value) => {
-    if (value === null || value === undefined || value === '') {
-      return '0'
-    }
-    const numeric = Number(value)
-    return Number.isNaN(numeric) ? String(value) : numeric.toLocaleString()
+const normalizeListOutput = (value) => {
+  if (!value) return ''
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).join('\n')
   }
-  return `${symbol}${formatPart(min)} - ${symbol}${formatPart(max)}`
+  return String(value)
 }
+
+// Budget range formatting removed — currency and price ranges are no longer used in the frontend
 
 const buildClientSnapshot = (user) => ({
   id: user?.uid || null,

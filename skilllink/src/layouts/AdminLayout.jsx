@@ -1,8 +1,11 @@
-import { ShieldCheck, Activity, AlertTriangle, LayoutDashboard } from 'lucide-react'
+import { ShieldCheck, Activity, AlertTriangle, LayoutDashboard, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import UserMenu from '../components/UserMenu'
 
-const navItems = [{ label: 'Overview', icon: LayoutDashboard, to: '/admin' }]
+const navItems = [
+  { label: 'Dashboard', icon: LayoutDashboard, to: '/admin' },
+  { label: 'Accounts', icon: Users, to: '/admin/users' },
+]
 
 const AdminLayout = () => {
   const navigate = useNavigate()
@@ -14,7 +17,6 @@ const AdminLayout = () => {
           <ShieldCheck size={24} aria-hidden="true" />
           <div>
             <strong>SkillLink</strong>
-            <span>Trust & Safety</span>
           </div>
         </button>
 
@@ -34,24 +36,23 @@ const AdminLayout = () => {
               {item.label}
             </NavLink>
           ))}
-          <div className="admin-nav-disabled" aria-disabled="true">
+          {/* <div className="admin-nav-disabled" aria-disabled="true">
             <AlertTriangle size={16} aria-hidden="true" />
             Reports (soon)
-          </div>
-          <div className="admin-nav-disabled" aria-disabled="true">
+          </div> */}
+          {/* <div className="admin-nav-disabled" aria-disabled="true">
             <Activity size={16} aria-hidden="true" />
             Security (soon)
-          </div>
+          </div> */}
         </nav>
       </aside>
 
       <div className="admin-main-panel">
         <header className="admin-topbar">
           <div>
-            <p className="admin-topbar-label">Realtime enforcement</p>
             <h1>Admin console</h1>
           </div>
-          <UserMenu variant="dark" />
+          <UserMenu variant="light" />
         </header>
 
         <main className="admin-main">

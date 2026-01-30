@@ -57,7 +57,7 @@ const FreelancerDashboard = () => {
     <div className="freelancer-dashboard">
       <section className="freelancer-welcome">
         <h1>Welcome back, {firstName}</h1>
-        <p>Stay on top of your SkillLink pipeline and keep Lagos-to-Abuja clients informed.</p>
+        <p>Stay on top of your SkillLink Journey and keep clients informed.</p>
       </section>
 
       {error && (
@@ -120,7 +120,7 @@ const buildStatCards = (proposals) => {
     {
       label: 'Active Gigs',
       value: `${active}`,
-      change: wins ? `${wins} win${wins === 1 ? '' : 's'} this month` : 'Secure a win to unlock badges',
+      change: '', // wins ? `${wins} win${wins === 1 ? '' : 's'} this month` : '',
       cta: 'View active projects',
       icon: Briefcase,
       target: '/freelancer/my-gigs',
@@ -128,7 +128,7 @@ const buildStatCards = (proposals) => {
     {
       label: 'Applications Sent',
       value: `${submitted}`,
-      change: submitted ? 'Follow up within 48hrs' : 'No pending applications',
+      change: submitted ? 'Follow up within 48hrs' : '',
       cta: 'Track proposals',
       icon: Send,
       target: '/freelancer/my-proposals',

@@ -1,6 +1,6 @@
-import { Edit3, Info, Loader2, PlusCircle, Share2, ShieldCheck, Trash2, UploadCloud, X } from 'lucide-react'
+import { Edit3, Info, Loader2, PlusCircle, ShieldCheck, Trash2, UploadCloud, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { saveFreelancerProfile } from '../services/firestoreClient'
+import { requestVerificationReview, saveFreelancerProfile } from '../services/firestoreClient'
 import { useAuth } from '../context/AuthContext'
 import {
   deleteLocalPortfolioAssetBlob,
@@ -15,13 +15,22 @@ const defaultProfile = {
   location: '',
   state: '',
   summary: '',
-  availability: '',
   skills: [],
   featured: [],
-  languages: [],
+  isProfileVisible: true,
+  experienceLevel: 'intermediate',
+  nin: '',
 }
 
 const skillSuggestions = ['Product Strategy', 'Service Design', 'Flutter', 'No-code Automation']
+
+const experienceLevelLabels = {
+  beginner: 'Beginner',
+  intermediate: 'Intermediate',
+  professional: 'Professional',
+}
+
+const experienceLevelOptions = Object.entries(experienceLevelLabels).map(([value, label]) => ({ value, label }))
 
 const initialProjectForm = {
   title: '',
@@ -92,6 +101,8 @@ const getInitials = (value) => {
   return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
 }
 
+const sanitizeNinInput = (value) => (value ? value.replace(/[^0-9]/g, '').slice(0, 11) : '')
+
 const FreelancerProfile = () => {
   const { user, refresh } = useAuth()
   const [profile, setProfile] = useState(defaultProfile)
@@ -99,6 +110,7 @@ const FreelancerProfile = () => {
   const [status, setStatus] = useState('idle')
   const [error, setError] = useState('')
   const [lastSaved, setLastSaved] = useState('')
+  const [editingIdentity, setEditingIdentity] = useState(false)
   const [editingBio, setEditingBio] = useState(false)
   const [bioDraft, setBioDraft] = useState('')
   const [addingSkill, setAddingSkill] = useState(false)
@@ -113,6 +125,8 @@ const FreelancerProfile = () => {
   const [portfolioUploadError, setPortfolioUploadError] = useState('')
   const localPortfolioMediaUrlsRef = useRef({})
   const [localPortfolioMediaVersion, setLocalPortfolioMediaVersion] = useState(0)
+  const [verificationNotice, setVerificationNotice] = useState(null)
+  const [verificationStatusLoading, setVerificationStatusLoading] = useState(false)
 
   const hydrateProfile = useCallback(() => {
     if (!user) return
@@ -123,10 +137,11 @@ const FreelancerProfile = () => {
       location: user.location || '',
       state: user.state || '',
       summary: user.summary || '',
-      availability: user.availability || '',
       skills: user.skills?.length ? user.skills : [],
       featured: normalizedFeatured,
-      languages: Array.isArray(user.languages) ? user.languages.filter(Boolean).slice(0, 3) : [],
+      isProfileVisible: user.isProfileVisible !== false,
+      experienceLevel: user.experienceLevel || 'intermediate',
+      nin: sanitizeNinInput(user.nin),
     }
     setProfile(hydrated)
     setDraft(hydrated)
@@ -239,9 +254,12 @@ const FreelancerProfile = () => {
     [draft.displayName, user?.email]
   )
 
-  const languages = useMemo(() => {
-    return (draft.languages || []).filter(Boolean).slice(0, 3)
-  }, [draft.languages])
+  const isProfileVisible = draft.isProfileVisible !== false
+  const experienceLevelLabel = experienceLevelLabels[draft.experienceLevel] || 'Set your experience level'
+  const visibilityLabel = isProfileVisible ? 'Visible to clients' : 'Hidden from clients'
+  const visibilityHint = isProfileVisible
+    ? 'Your profile can surface in searches and invites.'
+    : 'Only you can view your profile until you switch it back on.'
 
   const locationLabel = useMemo(() => {
     if (draft.location?.trim()) {
@@ -283,6 +301,36 @@ const FreelancerProfile = () => {
     return `Member since ${parsed.getFullYear()}`
   }, [user?.createdAt])
 
+  const verificationStatus = (user?.verificationStatus || 'unverified').toLowerCase()
+  const verificationNotes = user?.verificationNotes || user?.verificationRejectionReason || ''
+  const verificationStatusLabel =
+    verificationStatus === 'verified'
+      ? 'Verified'
+      : verificationStatus === 'pending'
+        ? 'Pending review'
+        : verificationStatus === 'rejected'
+          ? 'Rejected'
+          : 'Not verified'
+  const verificationHelperCopy =
+    verificationStatus === 'verified'
+      ? 'Your identity has been confirmed. Keep your details current.'
+      : verificationStatus === 'pending'
+        ? 'Our admin team is reviewing your submission.'
+        : verificationStatus === 'rejected'
+          ? verificationNotes || 'We could not verify your details. Update your NIN and resubmit.'
+          : 'Provide your National Identification Number to request a badge.'
+  const ninReady = (draft.nin || '').length === 11
+  const verificationButtonDisabled =
+    verificationStatusLoading || verificationStatus === 'pending' || verificationStatus === 'verified' || !ninReady
+  const verificationButtonLabel =
+    verificationStatus === 'verified'
+      ? 'Verified'
+      : verificationStatus === 'pending'
+        ? 'Awaiting review'
+        : verificationStatusLoading
+          ? 'Submitting…'
+          : 'Submit for verification'
+
   const handleDiscard = () => {
     const persistedIds = new Set((profile.featured || []).map((project) => project.media?.id).filter(Boolean))
     ;(draft.featured || []).forEach((project) => {
@@ -301,6 +349,7 @@ const FreelancerProfile = () => {
     setShowProjectForm(false)
     setEditingProjectIndex(null)
     setEditingBio(false)
+    setEditingIdentity(false)
     setAddingSkill(false)
     setPortfolioUploadError('')
     setIsDraggingPortfolioFile(false)
@@ -343,6 +392,42 @@ const FreelancerProfile = () => {
 
   const removeSkill = (skill) => {
     setDraft((prev) => ({ ...prev, skills: (prev.skills || []).filter((item) => item !== skill) }))
+  }
+
+  const handleIdentityFieldChange = (event) => {
+    const { name, value } = event.target
+    if (name === 'nin') {
+      setDraft((prev) => ({ ...prev, nin: sanitizeNinInput(value) }))
+      return
+    }
+    setDraft((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleVerificationRequest = async () => {
+    if (!user?.uid) {
+      setVerificationNotice({ tone: 'negative', message: 'Sign in again to submit a verification request.' })
+      return
+    }
+    const ninValue = sanitizeNinInput(draft.nin)
+    if (ninValue.length !== 11) {
+      setVerificationNotice({ tone: 'negative', message: 'Enter your 11-digit NIN before submitting.' })
+      return
+    }
+
+    setVerificationStatusLoading(true)
+    setVerificationNotice(null)
+    try {
+      await requestVerificationReview({ userId: user.uid, nin: ninValue })
+      setVerificationNotice({
+        tone: 'positive',
+        message: 'Thanks! We received your verification request and will respond shortly.',
+      })
+      await refresh().catch(() => {})
+    } catch (err) {
+      setVerificationNotice({ tone: 'negative', message: err?.message || 'Unable to submit verification right now.' })
+    } finally {
+      setVerificationStatusLoading(false)
+    }
   }
 
   const openProjectForm = (project = initialProjectForm, index = null) => {
@@ -560,6 +645,10 @@ const FreelancerProfile = () => {
     return [typeLabel, sizeLabel].filter(Boolean).join(' · ')
   }
 
+  const handleToggleVisibility = () => {
+    setDraft((prev) => ({ ...prev, isProfileVisible: !(prev.isProfileVisible !== false) }))
+  }
+
   const handleSave = async () => {
     if (!user?.uid || !hasChanges) return
     setStatus('saving')
@@ -568,12 +657,16 @@ const FreelancerProfile = () => {
     try {
       const payload = {
         ...draft,
+        nin: sanitizeNinInput(draft.nin),
+        isProfileVisible,
         skills: (draft.skills || []).filter(Boolean),
         featured: (draft.featured || []).filter(Boolean),
-        languages,
         state: draft.state?.trim() || '',
         location: draft.location?.trim() || draft.state?.trim() || '',
-        profileComplete: completeness / 100,
+        displayName: draft.displayName?.trim() || '',
+        title: draft.title?.trim() || '',
+        experienceLevel: draft.experienceLevel || 'intermediate',
+      
       }
       await saveFreelancerProfile(user.uid, payload)
       await refresh()
@@ -596,25 +689,6 @@ const FreelancerProfile = () => {
   return (
     <div className="freelancer-page freelancer-profile-page">
       <section className="profile-stack">
-        <article className="profile-card profile-completion-card">
-          <header className="profile-card-header">
-            <div>
-              <p className="eyebrow">Profile Completion</p>
-              <p>Add a portfolio item to reach 100% and unlock "Featured Freelancer" status.</p>
-            </div>
-            <strong>{completeness}%</strong>
-          </header>
-          <div
-            className="profile-progress-track"
-            role="progressbar"
-            aria-valuenow={completeness}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          >
-            <span style={{ width: `${Math.min(completeness, 100)}%` }} />
-          </div>
-        </article>
-
         <article className="profile-card profile-identity-card">
           <div className="profile-identity">
             <div className="profile-avatar-lg" aria-hidden="true">
@@ -623,6 +697,7 @@ const FreelancerProfile = () => {
             <div>
               <h1>{draft.displayName || 'Add your first + last name'}</h1>
               <p>{draft.title || 'Share your focus area (e.g., Product Designer)'}</p>
+              <span className="profile-experience-chip">{experienceLevelLabel}</span>
               <div className="profile-identity-meta">
                 <span>{locationLabel}</span>
                 <span>{memberSinceLabel}</span>
@@ -636,12 +711,125 @@ const FreelancerProfile = () => {
             </div>
           </div>
           <div className="profile-identity-actions">
-            <button type="button" className="profile-ghost-btn">
-              <Share2 size={16} aria-hidden="true" />
-              Share Profile
+        
+            <div className="profile-visibility-inline">
+              <div>
+                <p className="eyebrow">Profile visibility</p>
+                <p className="profile-empty-copy">Control whether clients can discover you.</p>
+              </div>
+              <div className="profile-visibility-toggle">
+                <div>
+                  <strong>{visibilityLabel}</strong>
+                  <small>{visibilityHint}</small>
+                </div>
+                <button
+                  type="button"
+                  className={`profile-visibility-switch${isProfileVisible ? ' is-on' : ''}`}
+                  onClick={handleToggleVisibility}
+                  aria-pressed={isProfileVisible}
+                  aria-label={isProfileVisible ? 'Hide profile from clients' : 'Show profile to clients'}
+                >
+                  <span />
+                </button>
+              </div>
+            </div>
+          </div>
+          <div>
+                <button
+              type="button"
+              className="profile-icon-btn"
+              onClick={() => setEditingIdentity((prev) => !prev)}
+              aria-pressed={editingIdentity}
+            >
+              <Edit3 size={16} aria-hidden="true" />
+              {editingIdentity ? 'Close editing' : 'Edit identity'}
             </button>
           </div>
+          {editingIdentity && (
+            <div className="profile-identity-edit-panel">
+              <div className="profile-field-grid">
+                <label>
+                  <span>Full name</span>
+                  <input
+                    name="displayName"
+                    value={draft.displayName}
+                    onChange={handleIdentityFieldChange}
+                    placeholder="Chioma Ajayi"
+                  />
+                </label>
+                <label>
+                  <span>Title</span>
+                  <input
+                    name="title"
+                    value={draft.title}
+                    onChange={handleIdentityFieldChange}
+                    placeholder="Product Designer"
+                  />
+                </label>
+                <label>
+                  <span>Location</span>
+                  <input
+                    name="location"
+                    value={draft.location}
+                    onChange={handleIdentityFieldChange}
+                    placeholder="Lagos, Nigeria"
+                  />
+                </label>
+                <label>
+                  <span>Experience level</span>
+                  <select name="experienceLevel" value={draft.experienceLevel} onChange={handleIdentityFieldChange}>
+                    {experienceLevelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
         </article>
+      </section>
+
+      <section className="profile-card profile-verification-card">
+        <header className="profile-card-header">
+          <div>
+            <h3>Identity verification</h3>
+            <p>Share your National Identification Number (NIN) to display a verified badge.</p>
+          </div>
+          <span className={`verification-status-chip is-${verificationStatus}`}>
+            {verificationStatusLabel}
+          </span>
+        </header>
+        <label className="profile-field">
+          <span>NIN (11 digits)</span>
+          <input
+            name="nin"
+            value={draft.nin}
+            onChange={handleIdentityFieldChange}
+            placeholder="12345678901"
+            inputMode="numeric"
+            maxLength={11}
+          />
+        </label>
+        <p className={`verification-helper${verificationStatus === 'rejected' ? ' is-alert' : ''}`}>
+          {verificationHelperCopy}
+        </p>
+        {verificationNotice && (
+          <p className={`verification-feedback is-${verificationNotice.tone}`}>
+            {verificationNotice.message}
+          </p>
+        )}
+        <div className="profile-verification-actions">
+          <button
+            type="button"
+            className="profile-primary-btn"
+            onClick={handleVerificationRequest}
+            disabled={verificationButtonDisabled}
+          >
+            {verificationButtonLabel}
+          </button>
+        </div>
       </section>
 
       {error && status === 'error' && <div className="auth-alert">{error}</div>}
@@ -678,31 +866,6 @@ const FreelancerProfile = () => {
             {draft.summary}
           </p>
         )}
-        <p className="profile-tip">
-          <Info size={16} aria-hidden="true" />
-          Tip: Including keywords about your tech stack can increase visibility by 40%.
-        </p>
-      </section>
-
-      <section className="profile-card profile-languages-card">
-        <header className="profile-card-header">
-          <h3>Languages</h3>
-        </header>
-        {languages.length ? (
-          <div className="profile-skill-tags profile-language-tags">
-            {languages.map((language) => (
-              <span className="profile-skill-chip" key={`lang-${language}`}>
-                {language}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <p className="profile-empty-copy">Select up to three spoken languages from onboarding to display here.</p>
-        )}
-        <p className="profile-tip">
-          <Info size={16} aria-hidden="true" />
-          Clients see these languages on your proposals.
-        </p>
       </section>
 
       <section className="profile-card profile-skills-card">
@@ -833,7 +996,7 @@ const FreelancerProfile = () => {
                 <UploadCloud size={32} aria-hidden="true" />
               )}
               <p>
-                Drag & drop files here, or{' '}
+                Upload files here, {' '}
                 <button type="button" onClick={handlePortfolioBrowse} disabled={isUploadingPortfolioMedia}>
                   browse
                 </button>

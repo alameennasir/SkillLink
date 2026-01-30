@@ -3,47 +3,57 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import stateOptions from '../data/stateOptions'
-import { limitLanguagesInput, parseLanguagesInput } from '../utils/languageUtils'
 import { saveUserProfile } from '../services/firestoreClient'
 
 const freelancerInitial = {
   bio: '',
   skills: '',
   experienceLevel: 'intermediate',
-  portfolioUrl: '',
-  hourlyRate: '',
   state: '',
-  languages: '',
+  featured: [],
 }
 
 const FreelancerOnboarding = () => {
   const navigate = useNavigate()
   const { user, refresh } = useAuth()
   const [formState, setFormState] = useState(freelancerInitial)
+  const [showProjectForm, setShowProjectForm] = useState(false)
+  const [projectForm, setProjectForm] = useState({ title: '', description: '', url: '' })
   const [isSaving, setIsSaving] = useState(false)
   const [feedback, setFeedback] = useState('')
 
   useEffect(() => {
     if (!user) return
     setFormState({
-      bio: user.bio || '',
+      bio: user.summary || '',
       skills: Array.isArray(user.skills) ? user.skills.join(', ') : user.skills || '',
       experienceLevel: user.experienceLevel || 'intermediate',
-      portfolioUrl: user.portfolioUrl || '',
-      hourlyRate: user.hourlyRate || '',
       state: user.state || user.location || '',
-      languages: Array.isArray(user.languages) ? user.languages.join(', ') : user.languages || '',
+      featured: Array.isArray(user.featured) ? user.featured.map((p) => ({ title: p.title || '', description: p.description || '', url: p.url || '' })) : [],
     })
   }, [user])
 
   const handleChange = (event) => {
     const { name, value } = event.target
-    if (name === 'languages') {
-      const limited = limitLanguagesInput(value)
-      setFormState((prev) => ({ ...prev, languages: limited }))
-      return
-    }
     setFormState((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const handleProjectFieldChange = (e) => {
+    const { name, value } = e.target
+    setProjectForm((prev) => ({ ...prev, [name]: value }))
+  }
+
+  const addProject = (e) => {
+    e.preventDefault()
+    const title = projectForm.title.trim()
+    if (!title) return
+    setFormState((prev) => ({ ...prev, featured: [...(prev.featured || []), { ...projectForm }] }))
+    setProjectForm({ title: '', description: '', url: '' })
+    setShowProjectForm(false)
+  }
+
+  const removeProject = (index) => {
+    setFormState((prev) => ({ ...prev, featured: (prev.featured || []).filter((_, i) => i !== index) }))
   }
 
   const handleSubmit = async (event) => {
@@ -52,22 +62,20 @@ const FreelancerOnboarding = () => {
     setFeedback('')
     setIsSaving(true)
     try {
-      const languages = parseLanguagesInput(formState.languages)
       const selectedState = formState.state.trim()
       const payload = {
-        bio: formState.bio.trim(),
+        summary: formState.bio.trim(),
         skills: formState.skills
           .split(',')
           .map((skill) => skill.trim())
           .filter(Boolean),
         experienceLevel: formState.experienceLevel,
-        portfolioUrl: formState.portfolioUrl.trim(),
-        hourlyRate: formState.hourlyRate ? Number(formState.hourlyRate) : null,
+        featured: Array.isArray(formState.featured)
+          ? formState.featured.map((p) => ({ title: p.title || '', description: p.description || '', url: p.url || '' }))
+          : [],
         state: selectedState,
         location: selectedState || user?.location || '',
-        languages,
         onboardingStep: 'freelancer-onboarding-complete',
-        profileComplete: 0.7,
       }
       await saveUserProfile(user.uid, payload)
       await refresh()
@@ -86,7 +94,6 @@ const FreelancerOnboarding = () => {
     try {
       await saveUserProfile(user.uid, {
         onboardingStep: 'freelancer-onboarding-complete',
-        profileComplete: user?.profileComplete ?? 0.4,
       })
       await refresh()
       navigate('/freelancer', { replace: true })
@@ -134,60 +141,58 @@ const FreelancerOnboarding = () => {
             </select>
           </label>
 
-          <label>
-            <span>Top skills (comma separated)</span>
-            <textarea
-              name="skills"
-              value={formState.skills}
-              onChange={handleChange}
-              rows={3}
-              placeholder="Brand design, Copywriting, Motion graphics"
-            />
-          </label>
+          <section>
+            <h3>Portfolio case studies</h3>
+            {(formState.featured || []).length === 0 && <p>No case studies added yet.</p>}
+            {(formState.featured || []).map((p, i) => (
+              <div key={i} className="case-study-card">
+                <strong>{p.title || 'Untitled case study'}</strong>
+                {p.description && <p>{p.description}</p>}
+                {p.url && (
+                  <p>
+                    <a href={p.url} target="_blank" rel="noreferrer">
+                      {p.url}
+                    </a>
+                  </p>
+                )}
+                <button type="button" className="auth-back" onClick={() => removeProject(i)}>
+                  Remove
+                </button>
+              </div>
+            ))}
 
-          <label>
-            <span>Languages spoken (max 3)</span>
-            <input
-              name="languages"
-              value={formState.languages}
-              onChange={handleChange}
-              placeholder="English, Yoruba, Hausa"
-            />
-            <small>Share up to three languages — extra entries are ignored.</small>
-          </label>
+            {showProjectForm ? (
+              <form onSubmit={addProject} className="case-study-form">
+                <label>
+                  <span>Title</span>
+                  <input name="title" value={projectForm.title} onChange={handleProjectFieldChange} required />
+                </label>
 
-          <label>
-            <span>Experience level</span>
-            <select name="experienceLevel" value={formState.experienceLevel} onChange={handleChange}>
-              <option value="beginner">Beginner</option>
-              <option value="intermediate">Intermediate</option>
-              <option value="senior">Senior</option>
-              <option value="lead">Lead</option>
-            </select>
-          </label>
+                <label>
+                  <span>Description</span>
+                  <textarea name="description" value={projectForm.description} onChange={handleProjectFieldChange} rows={3} />
+                </label>
 
-          <label>
-            <span>Portfolio or website</span>
-            <input
-              name="portfolioUrl"
-              value={formState.portfolioUrl}
-              onChange={handleChange}
-              placeholder="https://"
-            />
-          </label>
+                <label>
+                  <span>Project URL (optional)</span>
+                  <input name="url" value={projectForm.url} onChange={handleProjectFieldChange} placeholder="https://" />
+                </label>
 
-          <label>
-            <span>Hourly rate (optional)</span>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              name="hourlyRate"
-              value={formState.hourlyRate}
-              onChange={handleChange}
-              placeholder="15000"
-            />
-          </label>
+                <div className="onboarding-actions">
+                  <button type="button" className="auth-back" onClick={() => setShowProjectForm(false)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="auth-submit">
+                    Add case study
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button type="button" className="auth-submit" onClick={() => setShowProjectForm(true)}>
+                Add case study
+              </button>
+            )}
+          </section>
 
           <div className="onboarding-actions">
             <button type="button" className="auth-back" onClick={handleSkip} disabled={isSaving}>

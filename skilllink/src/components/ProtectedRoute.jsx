@@ -21,6 +21,15 @@ const ProtectedRoute = ({ allowRoles, children }) => {
     return <Navigate to="/auth/login" replace state={{ from: location.pathname + location.search }} />
   }
 
+  if (user.isBlocked) {
+    return (
+      <div className="protected-state protected-state-error">
+        <p>Your account access has been blocked.</p>
+        {user.blockedReason && <p className="protected-subtext">Reason: {user.blockedReason}</p>}
+      </div>
+    )
+  }
+
   if (allowRoles?.length && !allowRoles.includes(user.role)) {
     const fallback = user.role === 'freelancer' ? '/freelancer' : user.role === 'admin' ? '/admin' : '/client'
     return <Navigate to={fallback} replace />

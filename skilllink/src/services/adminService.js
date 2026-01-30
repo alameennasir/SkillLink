@@ -1,13 +1,13 @@
 import { collection, doc, getDoc, getDocs, limit, orderBy, query } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { getFirebaseFunctions, getFirestoreClient, requireFirebaseConfig } from './firebaseClient'
+import { setAccountBlockStatus } from './firestoreClient'
 
 const OVERVIEW_COLLECTION = 'admin'
 const OVERVIEW_DOC = 'overview'
 const REPORTS_COLLECTION = 'adminReports'
-const ACTIVITY_COLLECTION = 'adminActivity'
 const REPORT_LIMIT = 25
-const ACTIVITY_LIMIT = 15
+const useFirestoreAdmin = import.meta.env.VITE_USE_FIRESTORE_ADMIN === 'true'
 
 export const fetchAdminOverview = async () => {
   requireFirebaseConfig()
@@ -15,43 +15,56 @@ export const fetchAdminOverview = async () => {
 
   const overviewDoc = doc(db, OVERVIEW_COLLECTION, OVERVIEW_DOC)
   const reportsRef = collection(db, REPORTS_COLLECTION)
-  const activityRef = collection(db, ACTIVITY_COLLECTION)
 
-  const [overviewSnap, reportsSnap, activitySnap] = await Promise.all([
+  const [overviewSnap, reportsSnap] = await Promise.all([
     getDoc(overviewDoc),
     getDocs(query(reportsRef, orderBy('openedAt', 'desc'), limit(REPORT_LIMIT))),
-    getDocs(query(activityRef, orderBy('createdAt', 'desc'), limit(ACTIVITY_LIMIT))),
   ])
 
   const metrics = extractMetricCards(overviewSnap)
   const reports = reportsSnap.docs.map((docSnap) => normalizeReport(docSnap.id, docSnap.data()))
-  const activity = activitySnap.docs.map((docSnap) => normalizeActivity(docSnap.id, docSnap.data()))
 
-  return { metrics, reports, activity }
+  return { metrics, reports }
 }
 
 export const resolveReport = async (reportId) => {
-  if (!reportId) {
+  const normalizedId = String(reportId || '').trim()
+  if (!normalizedId) {
     throw new Error('Provide a report identifier before resolving.')
   }
-  return callAdminFunction('adminResolveReport', { reportId })
+  return callAdminFunction('adminResolveReport', { reportId: normalizedId })
 }
 
-export const blockAccount = async ({ accountId, reason }) => {
-  if (!accountId) {
-    throw new Error('Provide an account ID before blocking access.')
+export const blockAccount = async ({ accountId, email, reason }) => {
+  const identifier = normalizeAccountIdentifier({ accountId, email })
+  if (!identifier.accountId && !identifier.email) {
+    throw new Error('Provide an email or account ID before blocking access.')
+  }
+  if (useFirestoreAdmin) {
+    return setAccountBlockStatus({
+      ...identifier,
+      blocked: true,
+      reason: formatReason(reason),
+    })
   }
   return callAdminFunction('adminBlockAccount', {
-    accountId,
-    reason: reason?.trim() || 'No reason supplied',
+    ...identifier,
+    reason: formatReason(reason),
   })
 }
 
-export const liftBlock = async (accountId) => {
-  if (!accountId) {
-    throw new Error('Provide an account ID to restore access.')
+export const liftBlock = async ({ accountId, email }) => {
+  const identifier = normalizeAccountIdentifier({ accountId, email })
+  if (!identifier.accountId && !identifier.email) {
+    throw new Error('Provide an email or account ID to restore access.')
   }
-  return callAdminFunction('adminLiftBlock', { accountId })
+  if (useFirestoreAdmin) {
+    return setAccountBlockStatus({
+      ...identifier,
+      blocked: false,
+    })
+  }
+  return callAdminFunction('adminLiftBlock', identifier)
 }
 
 const extractMetricCards = (snapshot) => {
@@ -75,12 +88,6 @@ const normalizeReport = (id, data = {}) => ({
   openedAt: toIsoString(data.openedAt || data.createdAt || Date.now()),
 })
 
-const normalizeActivity = (id, data = {}) => ({
-  id,
-  message: data.message || data.summary || 'Log entry',
-  timestamp: formatDisplayTimestamp(data.createdAt || data.timestamp || Date.now()),
-})
-
 const toDateInstance = (value) => {
   if (!value) return null
   if (typeof value.toDate === 'function') return value.toDate()
@@ -98,15 +105,18 @@ const toIsoString = (value) => {
   return date ? date.toISOString() : new Date().toISOString()
 }
 
-const formatDisplayTimestamp = (value) => {
-  const date = toDateInstance(value)
-  if (!date) return ''
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
+const normalizeAccountIdentifier = ({ accountId, email }) => {
+  const normalizedEmail = email ? String(email).trim().toLowerCase() : ''
+  const normalizedAccountId = accountId ? String(accountId).trim() : ''
+  return {
+    email: normalizedEmail || undefined,
+    accountId: normalizedAccountId || undefined,
+  }
+}
+
+const formatReason = (reason) => {
+  const trimmed = reason?.trim()
+  return trimmed || 'No reason supplied'
 }
 
 const callAdminFunction = async (name, payload) => {

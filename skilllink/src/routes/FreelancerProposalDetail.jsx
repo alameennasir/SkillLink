@@ -1,16 +1,5 @@
 import { useEffect, useState } from 'react'
-import {
-  AlertCircle,
-  ArrowLeft,
-  CheckCircle2,
-  ImagePlus,
-  Link2,
-  Loader2,
-  MessageSquare,
-  Paperclip,
-  PenLine,
-  Upload,
-} from 'lucide-react'
+import { AlertCircle, ArrowLeft, CheckCircle2, Link2, Loader2, MessageSquare, PenLine } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -20,7 +9,6 @@ import {
   subscribeToFreelancerProposal,
   upsertFreelancerProposal,
 } from '../services/firestoreClient'
-import { uploadProposalAsset } from '../services/storageClient'
 import { isFirebaseConfigured } from '../services/firebaseClient'
 
 const stageOrder = ['draft', 'submitted', 'under_review', 'interview', 'hired', 'rejected']
@@ -49,17 +37,12 @@ const defaultMilestones = {
   rejectedAt: null,
 }
 
-const MAX_FILE_SIZE = 15 * 1024 * 1024 // 15MB
-
 const mapProposalRecordToGig = (record = {}, fallbackId) => ({
   id: record.gigId || fallbackId,
   clientId: record.clientId || record.clientUserId || record.client?.id || null,
   title: record.gigTitle || 'Untitled gig',
   summary: record.gigSummary || '',
-  priceRange: record.gigBudget || '',
-  priceType: record.gigType || '',
   deadline: record.gigDeadline || '',
-  tokens: record.gigTokens || 0,
   client: {
     name: record.gigClient || 'SkillLink client',
     verified: Boolean(record.clientVerified),
@@ -80,13 +63,11 @@ const FreelancerProposalDetail = () => {
   const [stage, setStage] = useState('draft')
   const [milestones, setMilestones] = useState(defaultMilestones)
   const [isEditing, setIsEditing] = useState(true)
-  const [attachments, setAttachments] = useState([])
-  const [samples, setSamples] = useState([])
   const [interviewLink, setInterviewLink] = useState('')
+  const [interviewSchedule, setInterviewSchedule] = useState('')
   const [decisionNotes, setDecisionNotes] = useState('')
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [uploadingCategory, setUploadingCategory] = useState(null)
   const [startingThread, setStartingThread] = useState(false)
 
   useEffect(() => {
@@ -104,11 +85,16 @@ const FreelancerProposalDetail = () => {
           setCoverLetter(existing.coverLetter || '')
           setStage(existing.status || 'draft')
           setMilestones({ ...defaultMilestones, ...(existing.milestones || {}) })
-          setAttachments(existing.attachments || [])
-          setSamples(existing.samples || [])
           setInterviewLink(existing.interviewLink || '')
+          setInterviewSchedule(existing.interviewSchedule || '')
           setDecisionNotes(existing.decisionNotes || '')
-          setIsEditing(existing.status === 'draft')
+          const gigClosed = existing.gigStatus === 'deleted' || existing.gigIsActive === false
+          if (gigClosed) {
+            setAlert({ tone: 'error', message: 'This gig is no longer hiring. You can delete the proposal from your list.' })
+            setIsEditing(false)
+          } else {
+            setIsEditing(existing.status === 'draft')
+          }
         } else {
           const gigRecord = await fetchGigById(gigId)
           if (!active) return
@@ -123,16 +109,13 @@ const FreelancerProposalDetail = () => {
             status: 'draft',
             coverLetter: gigRecord.coverLetterTemplate || '',
             milestones: defaultMilestones,
-            attachments: [],
-            samples: [],
           })
           if (!active) return
           setCoverLetter(created.coverLetter || gigRecord.coverLetterTemplate || '')
           setStage(created.status || 'draft')
           setMilestones({ ...defaultMilestones, ...(created.milestones || {}) })
-          setAttachments(created.attachments || [])
-          setSamples(created.samples || [])
           setInterviewLink('')
+          setInterviewSchedule('')
           setDecisionNotes('')
           setIsEditing(true)
         }
@@ -165,9 +148,8 @@ const FreelancerProposalDetail = () => {
         setStage(record.status || 'draft')
         setMilestones({ ...defaultMilestones, ...(record.milestones || {}) })
         setInterviewLink(record.interviewLink || '')
+        setInterviewSchedule(record.interviewSchedule || '')
         setDecisionNotes(record.decisionNotes || '')
-        setAttachments(record.attachments || [])
-        setSamples(record.samples || [])
         if (!isEditing) {
           setCoverLetter(record.coverLetter || '')
         }
@@ -197,11 +179,19 @@ const FreelancerProposalDetail = () => {
     }
   }
 
-  const formatFileMeta = (file) => {
-    if (!file) return ''
-    const sizeKb = file.size ? `${Math.round(file.size / 1024)} KB` : ''
-    const type = file.type || 'File'
-    return sizeKb ? `${sizeKb} · ${type}` : type
+  const formatDateTime = (value) => {
+    if (!value) return ''
+    try {
+      return new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      }).format(new Date(value))
+    } catch (error) {
+      return value
+    }
   }
 
   const computeStepState = (stepId) => {
@@ -273,8 +263,6 @@ const FreelancerProposalDetail = () => {
         status: nextStage,
         coverLetter,
         milestones: nextMilestones,
-        attachments,
-        samples,
       })
       setStage(nextStage)
       setMilestones(nextMilestones)
@@ -285,50 +273,6 @@ const FreelancerProposalDetail = () => {
       })
     } catch (error) {
       setAlert({ tone: 'error', message: error.message || 'Unable to save your proposal right now.' })
-    }
-  }
-
-  const handleFileChange = async (event, category) => {
-    const files = Array.from(event.target.files || [])
-    event.target.value = ''
-    if (!files.length || !user?.uid || !gigData?.id) return
-
-    const oversize = files.find((file) => file.size > MAX_FILE_SIZE)
-    if (oversize) {
-      setAlert({ tone: 'error', message: `${oversize.name} exceeds the 15MB limit.` })
-      return
-    }
-
-    setUploadingCategory(category)
-    try {
-      const uploads = []
-      for (const file of files) {
-        const asset = await uploadProposalAsset({ userId: user.uid, gigId: gigData.id, file, category })
-        uploads.push(asset)
-      }
-
-      const nextAttachments = category === 'attachments' ? [...attachments, ...uploads] : attachments
-      const nextSamples = category === 'samples' ? [...samples, ...uploads] : samples
-
-      if (category === 'attachments') {
-        setAttachments(nextAttachments)
-      } else {
-        setSamples(nextSamples)
-      }
-
-      await upsertFreelancerProposal(user.uid, gigData, {
-        attachments: nextAttachments,
-        samples: nextSamples,
-      })
-
-      setAlert({
-        tone: 'info',
-        message: `${uploads.length} file${uploads.length > 1 ? 's' : ''} uploaded successfully.`,
-      })
-    } catch (error) {
-      setAlert({ tone: 'error', message: error.message || 'Unable to upload files right now.' })
-    } finally {
-      setUploadingCategory(null)
     }
   }
 
@@ -378,24 +322,6 @@ const FreelancerProposalDetail = () => {
     }
   }
 
-  const handleRemoveFile = async (category, fileId) => {
-    if (!user?.uid || !gigData?.id) return
-    const nextAttachments = category === 'attachments' ? attachments.filter((file) => file.id !== fileId) : attachments
-    const nextSamples = category === 'samples' ? samples.filter((file) => file.id !== fileId) : samples
-
-    setAttachments(nextAttachments)
-    setSamples(nextSamples)
-
-    try {
-      await upsertFreelancerProposal(user.uid, gigData, {
-        attachments: nextAttachments,
-        samples: nextSamples,
-      })
-    } catch (error) {
-      setAlert({ tone: 'error', message: error.message || 'Unable to update files right now.' })
-    }
-  }
-
   if (!gigData && !loading) {
     return (
       <div className="proposal-page">
@@ -420,7 +346,7 @@ const FreelancerProposalDetail = () => {
           <span>{gigData?.title || 'Untitled gig'}</span>
         </div>
         <div className="proposal-header-actions">
-          <button
+          {/* <button
             type="button"
             className="ghost-button"
             onClick={handleMessageClient}
@@ -428,7 +354,7 @@ const FreelancerProposalDetail = () => {
           >
             {startingThread ? <Loader2 size={16} className="icon-spin" aria-hidden="true" /> : <MessageSquare size={16} aria-hidden="true" />}
             Message Client
-          </button>
+          </button> */}
           <button
             type="button"
             className="ghost-button"
@@ -468,7 +394,7 @@ const FreelancerProposalDetail = () => {
         </div>
       )}
 
-      {(interviewLink || stage === 'interview') && (
+      {(interviewLink || interviewSchedule || stage === 'interview') && (
         <section className={`proposal-interview-card ${interviewLink ? '' : 'is-pending'}`}>
           <div>
             <p className="eyebrow">Interview status</p>
@@ -478,6 +404,9 @@ const FreelancerProposalDetail = () => {
                 ? 'Use the link below at your scheduled time.'
                 : 'Sit tight — the client is finalizing your Google Meet link.'}
             </span>
+            {interviewSchedule && (
+              <small>Scheduled for {formatDateTime(interviewSchedule)}</small>
+            )}
           </div>
           {interviewLink ? (
             <a href={interviewLink} target="_blank" rel="noreferrer" className="cta cta-primary">
@@ -511,33 +440,9 @@ const FreelancerProposalDetail = () => {
         </article>
       ) : (
         <section className="proposal-layout">
-          <aside className="proposal-sidebar">
-            <article className="proposal-card">
-              <h3>Gig Overview</h3>
-              <dl>
-                <div>
-                  <dt>Job Title</dt>
-                  <dd>{gigData?.title || 'Untitled gig'}</dd>
-                </div>
-                <div>
-                  <dt>Client</dt>
-                  <dd>
-                    {gigData?.client?.name || 'SkillLink client'}{' '}
-                    {gigData?.client?.verified && <span className="gig-verified">Verified</span>}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Budget</dt>
-                  <dd>
-                    {gigData?.priceRange || '₦—'} · {gigData?.priceType || 'Fixed/Hourly'}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Deadline</dt>
-                  <dd>{gigData?.deadline || 'Flexible'}</dd>
-                </div>
-              </dl>
-              <p className="proposal-sidebar-description">{gigData?.summary || 'Client did not add a summary yet.'}</p>
+          <div className="proposal-main">
+            <article className="proposal-card proposal-gig-summary">
+              <p>{gigData?.summary || 'Client did not add a summary yet.'}</p>
               <button
                 type="button"
                 className="ghost-button ghost-compact"
@@ -547,53 +452,6 @@ const FreelancerProposalDetail = () => {
               </button>
             </article>
 
-            <article className="proposal-card">
-              <div className="proposal-card-head">
-                <p>Attachments</p>
-                <span>{attachments.length ? `${attachments.length} files` : 'No attachments yet'}</span>
-              </div>
-              <div className="proposal-upload">
-                <label className="ghost-button ghost-compact proposal-upload-trigger">
-                  <Upload size={16} aria-hidden="true" />
-                  Add attachment
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.zip"
-                    onChange={(event) => handleFileChange(event, 'attachments')}
-                  />
-                </label>
-                <small>PDF, DOCX, or image files up to 15MB.</small>
-                {uploadingCategory === 'attachments' && (
-                  <span className="proposal-upload-status">
-                    <Loader2 size={16} className="icon-spin" aria-hidden="true" /> Uploading...
-                  </span>
-                )}
-              </div>
-              {attachments.length === 0 && <p>No files uploaded yet.</p>}
-              <ul className="proposal-attachments">
-                {attachments.map((file) => (
-                  <li key={file.id}>
-                    <Paperclip size={16} aria-hidden="true" />
-                    <div>
-                      <strong>{file.name}</strong>
-                      <span>{formatFileMeta(file)}</span>
-                    </div>
-                    <div className="proposal-file-actions">
-                      <a href={file.url} target="_blank" rel="noreferrer" download={file.name}>
-                        Download
-                      </a>
-                      <button type="button" onClick={() => handleRemoveFile('attachments', file.id)}>
-                        Remove
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </article>
-          </aside>
-
-          <div className="proposal-main">
             <article className="proposal-card">
               <div className="proposal-card-head">
                 <div>
@@ -621,53 +479,6 @@ const FreelancerProposalDetail = () => {
               ) : (
                 <div className="proposal-letter">{renderLetter()}</div>
               )}
-            </article>
-
-            <article className="proposal-card">
-              <div className="proposal-card-head">
-                <div>
-                  <p>Portfolio Samples</p>
-                  <span>{samples.length ? `${samples.length} files attached` : 'No samples added'}</span>
-                </div>
-              </div>
-              <div className="proposal-upload">
-                <label className="ghost-button ghost-compact proposal-upload-trigger">
-                  <ImagePlus size={16} aria-hidden="true" />
-                  Add samples
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*,.pdf"
-                    onChange={(event) => handleFileChange(event, 'samples')}
-                  />
-                </label>
-                {uploadingCategory === 'samples' && (
-                  <span className="proposal-upload-status">
-                    <Loader2 size={16} className="icon-spin" aria-hidden="true" /> Uploading...
-                  </span>
-                )}
-              </div>
-              <div className="proposal-samples">
-                {samples.map((sample) => (
-                  <figure key={sample.id}>
-                    {sample.type?.startsWith('image/') && sample.url ? (
-                      <img src={sample.url} alt={sample.name} />
-                    ) : (
-                      <div className="proposal-sample-file">{sample.name}</div>
-                    )}
-                    <figcaption>{sample.name}</figcaption>
-                    <div className="proposal-file-actions">
-                      <a href={sample.url} target="_blank" rel="noreferrer">
-                        View
-                      </a>
-                      <button type="button" onClick={() => handleRemoveFile('samples', sample.id)}>
-                        Remove
-                      </button>
-                    </div>
-                  </figure>
-                ))}
-                {!samples.length && <p>Add visuals or PDFs to help the client review your work.</p>}
-              </div>
             </article>
 
             <article className="proposal-card proposal-alert">

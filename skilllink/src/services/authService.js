@@ -27,17 +27,14 @@ export const registerAccount = async ({ email, password, role, accountDetails = 
 
   const {
     fullName = '',
+    title = '',
     companyName = '',
     entityType = 'company',
     industry = '',
-    hiringFocus = '',
-    phone = '',
     skills = [],
     experienceLevel = 'beginner',
     portfolioUrl = '',
     hourlyRate = '',
-    adminDepartment = '',
-    adminTitle = '',
   } = accountDetails
 
   const displayName =
@@ -55,17 +52,12 @@ export const registerAccount = async ({ email, password, role, accountDetails = 
       : normalizedRole === 'freelancer'
         ? 'freelancer-essentials'
         : 'admin-ready'
-  const profileComplete = normalizedRole === 'admin' ? 1 : normalizedRole === 'client' ? 0.2 : 0.25
-
   const profileBase = {
     uid: credential.user.uid,
     role: normalizedRole,
     displayName,
     email: credential.user.email,
-    phone: phone?.trim() || null,
-    accountTier: normalizedRole === 'admin' ? 'Admin' : 'Pending',
     onboardingStep,
-    profileComplete,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   }
@@ -76,11 +68,11 @@ export const registerAccount = async ({ email, password, role, accountDetails = 
           companyName: companyName?.trim() || displayName,
           companyType: entityType,
           industry: industry?.trim() || '',
-          hiringFocus: hiringFocus?.trim() || '',
         }
       : normalizedRole === 'freelancer'
         ? {
             fullName: fullName?.trim() || displayName,
+          title: title?.trim() || '',
             skills: normalizeSkills(skills),
             experienceLevel,
             portfolioUrl: portfolioUrl?.trim() || '',
@@ -88,8 +80,6 @@ export const registerAccount = async ({ email, password, role, accountDetails = 
           }
         : {
             fullName: fullName?.trim() || displayName,
-            adminDepartment: adminDepartment?.trim() || '',
-            adminTitle: adminTitle?.trim() || '',
             permissions: ['monitor_users', 'handle_reports', 'block_accounts'],
           }
 

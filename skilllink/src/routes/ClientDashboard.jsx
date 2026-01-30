@@ -56,7 +56,7 @@ const ClientDashboard = () => {
             <p className="stat-label">{stat.label}</p>
             <div className="stat-value-row">
               <p className="stat-value">{isLoading ? '--' : stat.value}</p>
-              {stat.trend && <span className={`trend-pill trend-${stat.tone}`}>{stat.trend}</span>}
+              {/* {stat.trend && <span className={`trend-pill trend-${stat.tone}`}>{stat.trend}</span>} */}
             </div>
           </article>
         ))}

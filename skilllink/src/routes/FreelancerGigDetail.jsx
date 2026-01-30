@@ -70,7 +70,7 @@ const FreelancerGigDetail = () => {
   const responsibilities = ensureList(gig.responsibilities)
   const requirements = ensureList(gig.requirements)
   const timelineLabel = gig.timeline || gig.deadline || 'Flexible'
-  const clientLanguages = Array.isArray(gig.client?.languages) ? gig.client.languages.filter(Boolean) : []
+  // client languages removed from frontend
   const clientLocation = gig.client?.location || gig.client?.state || 'Nigeria (remote)'
 
   return (
@@ -82,7 +82,7 @@ const FreelancerGigDetail = () => {
 
       <section className="freelancer-gig-hero">
         <div>
-          <p className="gig-breadcrumb">Browse Gigs · {gig.client?.sector || 'Nigerian teams'}</p>
+          {/* <p className="gig-breadcrumb">Browse Gigs · {gig.client?.sector || 'Nigerian teams'}</p> */}
           <h1>{gig.title}</h1>
           <p className="gig-hero-summary">{gig.summary}</p>
           <div className="gig-hero-tags">
@@ -94,34 +94,18 @@ const FreelancerGigDetail = () => {
             <button type="button" className="cta cta-primary" onClick={handleApply}>
               Apply to this gig
             </button>
-            <button type="button" className="ghost-button">
+            {/* <button type="button" className="ghost-button">
               Save gig
               <BookmarkPlus size={16} aria-hidden="true" />
-            </button>
+            </button> */}
           </div>
         </div>
-        <div className="gig-hero-panel">
-          <div className="gig-hero-row">
-            <Wallet size={18} aria-hidden="true" />
-            <div>
-              <p>Budget</p>
-              <strong>
-                {gig.priceRange || '₦—'} · {gig.priceType || 'TBD'}
-              </strong>
-            </div>
-          </div>
+          <div className="gig-hero-panel">
           <div className="gig-hero-row">
             <Clock3 size={18} aria-hidden="true" />
             <div>
               <p>Timeline</p>
               <strong>{timelineLabel}</strong>
-            </div>
-          </div>
-          <div className="gig-hero-row">
-            <Sparkles size={18} aria-hidden="true" />
-            <div>
-              <p>Tokens rewarded</p>
-              <strong>{gig.tokens ? `${gig.tokens} tokens` : 'Token perks shared after shortlist'}</strong>
             </div>
           </div>
           <div className="gig-hero-row">
@@ -132,10 +116,6 @@ const FreelancerGigDetail = () => {
                 {gig.client?.name || 'SkillLink client'}{' '}
                 {gig.client?.verified && <span className="gig-verified">Verified</span>}
               </strong>
-              <small>
-                {gig.client?.rating ? `${gig.client.rating} rating · ` : ''}
-                {gig.client?.jobsPosted ? `${gig.client.jobsPosted} past gigs` : 'New client'}
-              </small>
             </div>
           </div>
         </div>
@@ -211,18 +191,15 @@ const FreelancerGigDetail = () => {
                 <dt>Location</dt>
                 <dd>{clientLocation}</dd>
               </div>
+              {/* Languages removed from client snapshot */}
               <div>
-                <dt>Languages</dt>
-                <dd>{clientLanguages.length ? clientLanguages.join(', ') : 'Not shared'}</dd>
+                {/* <dt>Jobs posted</dt> */}
+                {/* <dd>{gig.client?.jobsPosted ?? '—'}</dd> */}
               </div>
-              <div>
-                <dt>Jobs posted</dt>
-                <dd>{gig.client?.jobsPosted ?? '—'}</dd>
-              </div>
-              <div>
+              {/* <div>
                 <dt>Average rating</dt>
                 <dd>{gig.client?.rating ?? '—'}</dd>
-              </div>
+              </div> */}
             </dl>
           </article>
 

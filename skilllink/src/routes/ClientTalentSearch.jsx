@@ -1,46 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Search, MapPin, ExternalLink, ChevronDown, Linkedin, Twitter, Dribbble, Languages } from 'lucide-react'
-import { searchFreelancers } from '../services/firestoreClient'
+import { useNavigate } from 'react-router-dom'
+import { Search, MapPin, ExternalLink, ChevronDown, Linkedin, Twitter, Dribbble, ShieldCheck, X } from 'lucide-react'
+import { searchFreelancers, createMessagingThread } from '../services/firestoreClient'
 import { isFirebaseConfigured } from '../services/firebaseClient'
-
-const filterButtons = ['All Talent', 'Categories', 'Hourly Rate']
-
-const sortOptions = [
-  { id: 'relevant', label: 'Most Relevant' },
-  { id: 'recent', label: 'Most Recent' },
-  { id: 'rating', label: 'Highest Rated' },
-]
-
-const footerLinkGroups = [
-  {
-    title: 'Platform',
-    links: [
-      { label: 'Client Dashboard', to: '/' },
-      { label: 'Manage Gigs', to: '/client/manage-gigs' },
-      { label: 'Post a Gig', to: '/client/post-gig' },
-      { label: 'Find Talent', to: '/client/talent-search' },
-    ],
-  },
-  {
-    title: 'Resources',
-    links: [
-      { label: 'Help Center', href: '#' },
-      { label: 'Community', href: '#' },
-      { label: 'Guides', href: '#' },
-      { label: 'Blog', href: '#' },
-    ],
-  },
-  {
-    title: 'Legal',
-    links: [
-      { label: 'Privacy Policy', href: '#' },
-      { label: 'Terms of Service', href: '#' },
-      { label: 'Cookie Policy', href: '#' },
-      { label: 'Security', href: '#' },
-    ],
-  },
-]
+import { useAuth } from '../context/AuthContext'
+import { getInitials } from './clientApplicantHelpers'
 
 const footerSocialLinks = [
   { label: 'LinkedIn', icon: Linkedin, href: 'https://linkedin.com/company/skilllink' },
@@ -48,19 +12,37 @@ const footerSocialLinks = [
   { label: 'Dribbble', icon: Dribbble, href: 'https://dribbble.com/skilllink' },
 ]
 
+const TalentPortfolioPreview = ({ media = [], initials, name, variant = 'grid' }) => {
+  const primaryMedia = useMemo(() => (Array.isArray(media) ? media[0] : null), [media])
+  const copy = variant === 'grid' ? 'View case study' : 'Case files coming soon'
+  const previewSrc = primaryMedia?.thumbnail || primaryMedia?.previewUrl || primaryMedia?.url || ''
+
+  return (
+    <div className={`talent-portfolio-preview ${variant === 'modal' ? 'modal' : ''}`} aria-hidden={!previewSrc}>
+      {previewSrc ? (
+        <img src={previewSrc} alt={primaryMedia?.title || `${name} preview`} />
+      ) : (
+        <div className="talent-portfolio-fallback" aria-label={`No media uploaded for ${name} yet`}>
+          <span>{initials}</span>
+          <small>{copy}</small>
+        </div>
+      )}
+    </div>
+  )
+}
+
 const ClientTalentSearch = () => {
+  const navigate = useNavigate()
+  const { user } = useAuth()
   const [query, setQuery] = useState('')
-  const [sortSelection, setSortSelection] = useState('relevant')
+  const [activeCategory, setActiveCategory] = useState('All Talent')
+  const [visibleCount, setVisibleCount] = useState(12)
   const [talent, setTalent] = useState([])
   const [status, setStatus] = useState(isFirebaseConfigured ? 'loading' : 'error')
   const [error, setError] = useState(
     isFirebaseConfigured ? null : new Error('Provide Firebase credentials to surface real Nigerian talent.'),
   )
-
-  const activeSortLabel = useMemo(
-    () => sortOptions.find((option) => option.id === sortSelection)?.label ?? 'Most Relevant',
-    [sortSelection],
-  )
+  const [selectedCase, setSelectedCase] = useState(null)
 
   useEffect(() => {
     if (!isFirebaseConfigured) return
@@ -69,7 +51,7 @@ const ClientTalentSearch = () => {
       setStatus('loading')
       setError(null)
       try {
-        const results = await searchFreelancers({ limit: 48, verifiedOnly: true })
+        const results = await searchFreelancers({ limit: 48, visibleOnly: true })
         if (active) {
           setTalent(results)
           setStatus('ready')
@@ -87,14 +69,105 @@ const ClientTalentSearch = () => {
     }
   }, [])
 
-  const filteredTalent = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    if (!normalizedQuery) return talent
-    return talent.filter((person) => {
-      const searchable = [person.displayName, person.fullName, person.title, person.focusArea, ...(person.skills || [])]
-      return searchable.some((value) => value?.toLowerCase().includes(normalizedQuery))
+
+  const portfolioCases = useMemo(() => {
+    return talent.flatMap((person) => {
+      if (!Array.isArray(person.featured) || !person.featured.length) return []
+      const freelancerName = person.displayName || person.fullName || 'Freelancer'
+      const freelancerTitle = person.title || 'Independent talent'
+      const freelancerLocation = person.location || person.state || 'Remote'
+      const freelancerLanguages = []
+      const freelancerSkills = Array.isArray(person.skills) ? person.skills.filter(Boolean) : []
+      const freelancerInitials = getInitials(freelancerName)
+      return person.featured.map((caseItem, index) => ({
+        id: caseItem.id || `${person.id}-portfolio-${index}`,
+        title: caseItem.title || 'Untitled project',
+        description: caseItem.description || '',
+        previewUrl: caseItem.previewUrl || caseItem.media?.previewUrl || caseItem.media?.url || '',
+        tags: Array.isArray(caseItem.tags) ? caseItem.tags.filter(Boolean) : [],
+        url: caseItem.url || '',
+        freelancerId: person.id,
+        freelancerName,
+        freelancerTitle,
+        freelancerLocation,
+        
+        freelancerSkills,
+        freelancerInitials,
+        isVerified: person.verificationStatus === 'verified',
+        media: Array.isArray(caseItem.media) ? caseItem.media : caseItem.media ? [caseItem.media] : [],
+      }))
     })
-  }, [talent, query])
+  }, [talent])
+
+  const categories = useMemo(() => {
+    const tagSet = new Set()
+    portfolioCases.forEach((item) => {
+      item.tags?.forEach((tag) => tagSet.add(tag))
+      item.freelancerSkills?.forEach((skill) => tagSet.add(skill))
+    })
+    return ['All Talent', ...Array.from(tagSet).sort((a, b) => a.localeCompare(b))]
+  }, [portfolioCases])
+
+  const filteredCases = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+    return portfolioCases.filter((item) => {
+      const searchable = [
+        item.title,
+        item.description,
+        item.freelancerName,
+        item.freelancerTitle,
+        item.freelancerLocation,
+        ...(item.tags || []),
+        ...(item.freelancerSkills || []),
+      ]
+      const matchesQuery = normalizedQuery
+        ? searchable.some((value) => value?.toLowerCase().includes(normalizedQuery))
+        : true
+      const matchesCategory =
+        activeCategory === 'All Talent'
+          ? true
+          : [...(item.tags || []), ...(item.freelancerSkills || [])].some(
+              (value) => value?.toLowerCase() === activeCategory.toLowerCase(),
+            )
+      return matchesQuery && matchesCategory
+    })
+  }, [portfolioCases, query, activeCategory])
+
+  const visibleCases = useMemo(() => filteredCases.slice(0, visibleCount), [filteredCases, visibleCount])
+
+  useEffect(() => {
+    setVisibleCount(12)
+  }, [activeCategory, query])
+
+  const handleSelectCase = (caseItem) => {
+    setSelectedCase(caseItem)
+  }
+
+  const handleCloseCase = () => {
+    setSelectedCase(null)
+  }
+
+  const handleMessageFreelancer = async (caseItem) => {
+    if (!user?.uid) {
+      navigate('/auth/login', { state: { redirect: '/client/talent-search' } })
+      throw new Error('Sign in as a client to message freelancers.')
+    }
+    const thread = await createMessagingThread({
+      participants: [user.uid, caseItem.freelancerId],
+      createdBy: user.uid,
+      participantsInfo: {
+        [user.uid]: { displayName: user.displayName || 'Client' },
+        [caseItem.freelancerId]: {
+          displayName: caseItem.freelancerName,
+          title: caseItem.freelancerTitle,
+        },
+      },
+      subject: `${caseItem.title} | Portfolio intro`,
+      metadata: { source: 'talent-search', portfolioId: caseItem.id },
+      reuseExisting: true,
+    })
+    navigate('/client/messages', { state: { threadId: thread.id } })
+  }
 
   const handleSubmit = (event) => {
     event.preventDefault()
@@ -104,7 +177,6 @@ const ClientTalentSearch = () => {
   return (
     <div className="talent-page">
       <header className="talent-hero">
-        <p className="eyebrow">Find Talent</p>
         <h1>Discover Creative Talent</h1>
         <p className="talent-hero-copy">
           Source verified Nigerian designers, engineers, and storytellers. Every profile is reviewed before landing in
@@ -123,18 +195,16 @@ const ClientTalentSearch = () => {
         </form>
         <div className="talent-filter-row">
           <div className="talent-filter-group">
-            {filterButtons.map((label, index) => (
-              <button type="button" className={`talent-filter ${index === 0 ? 'talent-filter-active' : ''}`} key={label}>
+            {categories.map((label) => (
+              <button
+                type="button"
+                className={`talent-filter ${activeCategory === label ? 'talent-filter-active' : ''}`}
+                key={label}
+                onClick={() => setActiveCategory(label)}
+              >
                 {label}
-                {index > 0 && <ChevronDown size={16} aria-hidden="true" />}
               </button>
             ))}
-          </div>
-          <div className="talent-sort">
-            <span>Sort:</span>
-            <button type="button" className="talent-sort-pill" onClick={() => setSortSelection('relevant')}>
-              {activeSortLabel} <ChevronDown size={16} aria-hidden="true" />
-            </button>
           </div>
         </div>
       </header>
@@ -147,122 +217,59 @@ const ClientTalentSearch = () => {
           </div>
         ) : status === 'loading' ? (
           <div className="talent-empty">
-            <h3>Loading verified freelancers…</h3>
-            <p>Give us a moment to sync portfolios from Firestore.</p>
+            <h3>Loading freelancer portfolios…</h3>
+            <p>Give us a moment to sync case studies from Firestore.</p>
           </div>
-        ) : filteredTalent.length === 0 ? (
+        ) : filteredCases.length === 0 ? (
           <div className="talent-empty">
-            <h3>No profiles match your filters</h3>
-            <p>Try adjusting your search or inviting freelancers to complete verification.</p>
+            <h3>No portfolio cases yet</h3>
+            <p>Invite freelancers to publish case studies or adjust your filters.</p>
           </div>
         ) : (
           <>
-            <p className="results-count">{filteredTalent.length} profiles match your search</p>
-            <div className="talent-grid">
-              {filteredTalent.map((person) => (
-                <article className="talent-profile-card" key={person.id}>
-              <div className="talent-card-header">
-                <div className="talent-avatar" aria-hidden="true">
-                      {(person.displayName || person.fullName || 'SL').charAt(0)}
-                </div>
-                <div>
-                      <h3>{person.displayName || person.fullName || 'Unnamed talent'}</h3>
-                      <p className="talent-headline">{person.title || 'Add professional title'}</p>
-                </div>
-              </div>
-              <div className="talent-card-body">
-                <div className="talent-tags">
-                      {(person.skills || []).slice(0, 4).map((skill) => (
-                        <span className="talent-tag" key={`${person.id}-${skill}`}>
-                      {skill}
-                    </span>
-                  ))}
-                </div>
-                <div className="talent-meta-info">
-                  <div>
-                    <span>Rate</span>
-                        <strong>{person.rate || 'Share budget range'}</strong>
+            <p className="results-count">{filteredCases.length} portfolio cases ready to explore</p>
+            <div className="talent-portfolio-grid">
+              {visibleCases.map((item) => (
+                <button
+                  type="button"
+                  className="talent-portfolio-card compact"
+                  key={`${item.freelancerId}-${item.id}`}
+                  onClick={() => handleSelectCase(item)}
+                >
+                  <TalentPortfolioPreview
+                    media={item.media}
+                    initials={item.freelancerInitials}
+                    name={item.freelancerName}
+                    variant="grid"
+                  />
+                  <div className="talent-portfolio-body compact">
+                    <h3>{item.title}</h3>
+                    <p className="talent-card-author">{item.freelancerName}</p>
+                    <small>{item.freelancerTitle}</small>
                   </div>
-                  <div>
-                    <span>Location</span>
-                    <p>
-                          <MapPin size={15} aria-hidden="true" /> {person.location || 'Nigeria (remote)'}
-                    </p>
-                  </div>
-                  <div>
-                    <span>Languages</span>
-                    <p>
-                      <Languages size={15} aria-hidden="true" />{' '}
-                      <span>
-                        {Array.isArray(person.languages) && person.languages.filter(Boolean).length
-                          ? person.languages.filter(Boolean).slice(0, 3).join(', ')
-                          : 'Not shared'}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="talent-card-actions">
-                <button type="button" className="talent-ghost">
-                  View Portfolio <ExternalLink size={16} aria-hidden="true" />
                 </button>
-              </div>
-                </article>
               ))}
             </div>
-            <button type="button" className="load-more">
-              Load More Results <ChevronDown size={18} aria-hidden="true" />
-            </button>
+            {visibleCases.length < filteredCases.length && (
+              <button type="button" className="load-more" onClick={() => setVisibleCount((prev) => prev + 12)}>
+                Load More Results <ChevronDown size={18} aria-hidden="true" />
+              </button>
+            )}
           </>
         )}
       </section>
 
-      <div className="talent-footer-shell">
+      {selectedCase && (
+        <PortfolioCaseModal
+          caseItem={selectedCase}
+          onClose={handleCloseCase}
+          onMessage={handleMessageFreelancer}
+          canManageChats={Boolean(user?.uid)}
+        />
+      )}
+
+      {/* <div className="talent-footer-shell">
         <footer className="talent-footer">
-          <div className="talent-footer-top">
-          <div className="footer-brand-block">
-            <div className="footer-brand-head">
-              <div className="brand-logo" aria-hidden="true">
-                SL
-              </div>
-              <div>
-                <p>SkillLink</p>
-                <small>Connecting world-class creative talent with forward-thinking teams.</small>
-              </div>
-            </div>
-            <p className="footer-brand-copy">
-              Commission curated talent across Nigeria and the global creative community with one streamlined workflow.
-            </p>
-            <div className="footer-contact">
-              <span>Need help hiring?</span>
-              <a href="mailto:teams@skilllink.africa">teams@skilllink.africa</a>
-              <a href="tel:+2348000000000">+234 800 000 0000</a>
-            </div>
-          </div>
-          {footerLinkGroups.map((group) => (
-            <div className="footer-links" key={group.title}>
-              <strong>{group.title}</strong>
-              {group.links.map((link) =>
-                link.to ? (
-                  <Link to={link.to} className="footer-link" key={link.label}>
-                    {link.label}
-                  </Link>
-                ) : (
-                  <a href={link.href ?? '#'} className="footer-link" key={link.label}>
-                    {link.label}
-                  </a>
-                )
-              )}
-            </div>
-          ))}
-            <div className="footer-cta-card">
-              <strong>Ready to brief your next gig?</strong>
-              <p>
-                Outline deliverables, budgets, and timelines, then let SkillLink queue up curated talent in under 24 hours.
-              </p>
-              <button type="button">Post a New Gig</button>
-            </div>
-          </div>
           <div className="talent-footer-bottom">
             <p className="footer-legal">© 2024 SkillLink Inc. All rights reserved.</p>
             <div className="footer-socials">
@@ -274,9 +281,114 @@ const ClientTalentSearch = () => {
             </div>
           </div>
         </footer>
-      </div>
+      </div> */}
     </div>
   )
 }
 
+const PortfolioCaseModal = ({ caseItem, onClose, onMessage, canManageChats }) => {
+  const [messageStatus, setMessageStatus] = useState('idle')
+  const [feedback, setFeedback] = useState('')
+
+  const handleMessage = async () => {
+    if (!canManageChats) {
+      setFeedback('Sign in as a client to message freelancers.')
+      return
+    }
+    setMessageStatus('loading')
+    setFeedback('')
+    try {
+      await onMessage(caseItem)
+      setFeedback('Private chat ready in Messages.')
+      onClose()
+    } catch (error) {
+      setFeedback(error?.message || 'Unable to start the chat right now.')
+    } finally {
+      setMessageStatus('idle')
+    }
+  }
+
+  const languageCopy = 'Languages not shared'
+
+  return (
+    <>
+      <div className="talent-case-modal-backdrop" aria-hidden="true" onClick={onClose} />
+      <div className="talent-case-modal" role="dialog" aria-modal="true" aria-label="Portfolio case study detail">
+        <header className="talent-modal-head">
+          <div>
+            <p className="eyebrow">Portfolio case study</p>
+            <h2>{caseItem.title}</h2>
+            <small>
+              {caseItem.freelancerName} · {caseItem.freelancerTitle}
+            </small>
+          </div>
+          <button type="button" className="talent-modal-close" onClick={onClose} aria-label="Close portfolio detail">
+            <X size={18} aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className="talent-modal-body">
+          <div className="talent-modal-overview">
+            <div className="talent-modal-preview">
+              <TalentPortfolioPreview
+                media={caseItem.media}
+                initials={caseItem.freelancerInitials}
+                name={caseItem.freelancerName}
+                variant="modal"
+              />
+            </div>
+            <div className="talent-modal-copy">
+              <p>{caseItem.description || 'This freelancer has not added additional details yet.'}</p>
+              {caseItem.tags?.length ? (
+                <div className="talent-portfolio-tags">
+                  {caseItem.tags.slice(0, 6).map((tag) => (
+                    <span key={`${caseItem.id}-${tag}`}>{tag}</span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="talent-modal-meta">
+                <span>
+                  <MapPin size={14} aria-hidden="true" /> {caseItem.freelancerLocation || 'Remote'}
+                </span>
+                {/* Languages removed from profile details */}
+                {caseItem.isVerified && (
+                  <span className="talent-verified">
+                    <ShieldCheck size={14} aria-hidden="true" /> Verified
+                  </span>
+                )}
+              </div>
+              <div className="talent-modal-primary-actions">
+                <button
+                  type="button"
+                  className="talent-primary"
+                  onClick={handleMessage}
+                  disabled={messageStatus === 'loading'}
+                >
+                  {messageStatus === 'loading' ? 'Opening chat…' : 'Message privately'}
+                </button>
+                {caseItem.url ? (
+                  <a className="talent-ghost" href={caseItem.url} target="_blank" rel="noreferrer">
+                    View case study <ExternalLink size={16} aria-hidden="true" />
+                  </a>
+                ) : (
+                  <button type="button" className="talent-ghost" disabled>
+                    Case study link missing
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          
+
+          {feedback && <p className="talent-modal-feedback">{feedback}</p>}
+          {!canManageChats && <p className="talent-modal-hint">Sign in as a client to start a private chat.</p>}
+        </div>
+      </div>
+    </>
+  )
+}
+
 export default ClientTalentSearch
+
+

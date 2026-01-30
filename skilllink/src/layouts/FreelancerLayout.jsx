@@ -16,36 +16,31 @@ const FreelancerLayout = () => {
   return (
     <div className="freelancer-shell">
       <header className="freelancer-header" role="navigation" aria-label="Freelancer workspace">
-        <div className="freelancer-header-left">
-          <button type="button" className="freelancer-brand" onClick={() => navigate('/freelancer')}>
-            <div className="brand-logo" aria-hidden="true">
-              SL
-            </div>
-            <span>SkillLink</span>
-          </button>
+        <button type="button" className="freelancer-brand" onClick={() => navigate('/freelancer')}>
+          <span>SkillLink</span>
+        </button>
 
-          <nav className="freelancer-nav">
-            {navLinks.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/freelancer'}
-                className={({ isActive }) =>
-                  ['freelancer-nav-link', isActive ? 'freelancer-nav-link-active' : 'freelancer-nav-link-idle']
-                    .filter(Boolean)
-                    .join(' ')
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-        </div>
+        <nav className="freelancer-nav">
+          {navLinks.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/freelancer'}
+              className={({ isActive }) =>
+                ['freelancer-nav-link', isActive ? 'freelancer-nav-link-active' : 'freelancer-nav-link-idle']
+                  .filter(Boolean)
+                  .join(' ')
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
 
         <div className="freelancer-header-actions">
-          <button type="button" className="freelancer-icon-button" aria-label="Notifications">
+          {/* <button type="button" className="freelancer-icon-button" aria-label="Notifications">
             <Bell size={18} aria-hidden="true" />
-          </button>
+          </button> */}
           <UserMenu variant="light" />
         </div>
       </header>

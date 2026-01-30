@@ -10,7 +10,7 @@ const roleLabel = {
 }
 
 const primaryActions = {
-  client: { path: '/client/dashboard', label: 'Client dashboard' },
+  client: { path: '/client/profile', label: 'Client profile' },
   freelancer: { path: '/freelancer/profile', label: 'My profile' },
   admin: { path: '/admin', label: 'Admin console' },
 }

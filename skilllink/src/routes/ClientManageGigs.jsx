@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BadgeDollarSign, Clock3, Users, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
-import { subscribeToClientGigs, updateGigStatus } from '../services/firestoreClient'
+import { deleteGig, subscribeToClientGigs, updateGigStatus } from '../services/firestoreClient'
 import { isFirebaseConfigured } from '../services/firebaseClient'
 
 const gigFilters = [
@@ -25,7 +25,10 @@ const ClientManageGigs = () => {
   const [activeFilter, setActiveFilter] = useState('all')
   const [sortOrder, setSortOrder] = useState('newest')
   const [pendingGigId, setPendingGigId] = useState(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
+  const pageSize = 6
 
   useEffect(() => {
     if (!user?.uid) return
@@ -50,8 +53,17 @@ const ClientManageGigs = () => {
   }, [user?.uid])
 
 
-  const resolveBudget = (gig) =>
-    gig.budget || `${gig.currency || '₦'}${gig.budgetMin || '0'} - ${gig.currency || '₦'}${gig.budgetMax || '0'}`
+  const resolveApplicantCount = (gig) => {
+    // Show the total applicants on gig cards by default. Fall back to other
+    // fields if the total is not available.
+    if (typeof gig?.applicantsCount === 'number') return gig.applicantsCount
+    if (typeof gig?.applicants === 'number') return gig.applicants
+    if (typeof gig?.pendingApplicants === 'number') return gig.pendingApplicants
+    const byStatus = gig?.applicantsByStatus || null
+    const underReview = byStatus?.under_review
+    if (typeof underReview === 'number') return underReview
+    return 0
+  }
 
   const categoryCounts = useMemo(
     () => ({
@@ -83,6 +95,32 @@ const ClientManageGigs = () => {
       return dateB - dateA
     })
   }, [gigs, activeFilter, sortOrder])
+
+  const totalPages = Math.max(1, Math.ceil(visibleGigs.length / pageSize))
+  const pagedGigs = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return visibleGigs.slice(start, start + pageSize)
+  }, [page, pageSize, visibleGigs])
+
+  useEffect(() => {
+    try {
+      console.debug('ClientManageGigs: gigs updated', gigs.map((g) => ({ id: g.id, applicants: g.applicants, applicantsCount: g.applicantsCount })))
+    } catch (err) {}
+  }, [gigs])
+
+  useEffect(() => {
+    try {
+      console.debug('ClientManageGigs: pagedGigs', pagedGigs.map((g) => ({ id: g.id, applicants: g.applicants, applicantsCount: g.applicantsCount })))
+    } catch (err) {}
+  }, [pagedGigs])
+
+  useEffect(() => {
+    setPage(1)
+  }, [activeFilter, sortOrder])
+
+  useEffect(() => {
+    setPage((prev) => Math.min(prev, totalPages))
+  }, [totalPages])
 
   const handleCreateGig = () => {
     navigate('/client/post-gig')
@@ -117,13 +155,25 @@ const ClientManageGigs = () => {
       setPendingGigId(null)
     }
   }
+
+  const handleDeleteGig = async (gig) => {
+    if (!gig?.id) return
+    const confirmDelete = window.confirm('Delete this gig? This will close hiring for all applicants.')
+    if (!confirmDelete) return
+    setPendingDeleteId(gig.id)
+    try {
+      await deleteGig(gig.id, user?.uid)
+    } catch (error) {
+      console.error('Unable to delete gig', error)
+    } finally {
+      setPendingDeleteId(null)
+    }
+  }
   return (
     <div className="gigs-page">
-      <div className="gigs-breadcrumb">My Gigs</div>
 
       <header className="gigs-header">
         <div>
-          <p className="eyebrow">My Gigs</p>
           <h1>My Gigs Dashboard</h1>
         </div>
         <div className="gig-controls">
@@ -167,10 +217,15 @@ const ClientManageGigs = () => {
         <div className="gig-empty">No gigs in this view.</div>
       ) : (
         <div className="gig-cards">
-          {visibleGigs.map((gig) => (
+          {pagedGigs.map((gig) => (
             <article className="gig-dashboard-card" key={gig.id}>
               <div className="gig-card-header">
-                <span className={`status-pill status-${getStatusTone(gig.status)}`}>{normalizeStatusLabel(gig.status)}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span className={`status-pill status-${getStatusTone(gig.status)}`}>{normalizeStatusLabel(gig.status)}</span>
+                  <span className="applicant-status-pill" title={`${resolveApplicantCount(gig)} applicants`} aria-label={`${resolveApplicantCount(gig)} applicants`}>
+                    <Users size={14} aria-hidden="true" /> {resolveApplicantCount(gig)}
+                  </span>
+                </div>
                 <p>
                   Posted: {formatPostedDate(gig)}
                   {gig.pausedAt ? ` - Paused: ${formatDateValue(gig.pausedAt)}` : ''}
@@ -179,18 +234,19 @@ const ClientManageGigs = () => {
               <h3>{gig.title}</h3>
               <p className="gig-summary">{gig.summary || 'Awaiting summary details.'}</p>
               <div className="gig-card-meta">
-                <div>
+                {/* <div>
                   <BadgeDollarSign size={18} aria-hidden="true" />
                   <span>{resolveBudget(gig)}</span>
-                </div>
+                </div> */}
                 <div>
+                  <small>Project Deadline</small>
                   <Clock3 size={18} aria-hidden="true" />
                   <span>{gig.duration || gig.timeline || gig.projectLength || 'Ongoing'}</span>
                 </div>
-                <div>
+                {/* <div>
                   <Users size={18} aria-hidden="true" />
-                  <span>{gig.applicants || gig.pendingApplicants || 0} New Applicants</span>
-                </div>
+                  <span>{resolveApplicantCount(gig)} New Applicants</span>
+                </div> */}
               </div>
               <div className="gig-card-actions">
                 <button type="button" className="cta cta-primary" onClick={() => handleEditGig(gig)}>
@@ -213,28 +269,57 @@ const ClientManageGigs = () => {
                 >
                   {isPausedGig(gig) ? 'Resume Hiring' : 'Pause Hiring'}
                 </button>
+                <button
+                  type="button"
+                  className="gig-secondary"
+                  onClick={() => handleDeleteGig(gig)}
+                  disabled={pendingDeleteId === gig.id}
+                  aria-busy={pendingDeleteId === gig.id}
+                >
+                  {pendingDeleteId === gig.id ? 'Deleting…' : 'Delete Gig'}
+                </button>
               </div>
             </article>
           ))}
         </div>
       )}
 
-      <footer className="gig-pagination">
-        <button type="button" className="pager-btn" aria-label="Previous page">
-          <ChevronLeft size={18} aria-hidden="true" /> Previous
-        </button>
-        <div className="pager-pages">
-          <button type="button" className="pager-page pager-page-active">
-            1
+      {totalPages > 1 && (
+        <footer className="gig-pagination">
+          <button
+            type="button"
+            className="pager-btn"
+            aria-label="Previous page"
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={page === 1}
+          >
+            <ChevronLeft size={18} aria-hidden="true" /> Previous
           </button>
-          <button type="button" className="pager-page">2</button>
-          <span>...</span>
-          <button type="button" className="pager-page">14</button>
-        </div>
-        <button type="button" className="pager-btn" aria-label="Next page">
-          Next <ChevronRight size={18} aria-hidden="true" />
-        </button>
-      </footer>
+          <div className="pager-pages">
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
+              <button
+                key={pageNumber}
+                type="button"
+                className={['pager-page', pageNumber === page && 'pager-page-active']
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => setPage(pageNumber)}
+              >
+                {pageNumber}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="pager-btn"
+            aria-label="Next page"
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={page === totalPages}
+          >
+            Next <ChevronRight size={18} aria-hidden="true" />
+          </button>
+        </footer>
+      )}
 
     </div>
   )

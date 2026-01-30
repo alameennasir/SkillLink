@@ -16,9 +16,6 @@ const ClientLayout = () => {
     <div className="client-shell client-shell-light">
       <header className="client-topbar" role="navigation" aria-label="Primary">
         <div className="brand-mark" onClick={() => navigate('/client')}>
-          <span className="brand-logo" aria-hidden="true">
-            SL
-          </span>
           <div>
             <p>SkillLink</p>
           </div>
@@ -48,9 +45,9 @@ const ClientLayout = () => {
           <button type="button" className="cta cta-primary" onClick={() => navigate('/client/post-gig')}>
             Post a New Gig
           </button>
-          <button type="button" className="topbar-icon" aria-label="Notifications">
+          {/* <button type="button" className="topbar-icon" aria-label="Notifications">
             <Bell size={20} aria-hidden="true" />
-          </button>
+          </button> */}
           <UserMenu variant="light" />
         </div>
       </header>

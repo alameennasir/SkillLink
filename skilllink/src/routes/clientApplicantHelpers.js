@@ -40,17 +40,15 @@ export const formatApplicantRelative = (value) => {
   }
 }
 
-export const resolveApplicantId = (record = {}) => record.freelancerId || record.id || null
+export const resolveApplicantId = (record) => {
+  if (!record) return null
+  return record.freelancerId || record.id || null
+}
 
 export const resolveApplicantLocalTime = (record = {}) => record.localTimeLabel || 'Local time not shared'
 
 export const resolveApplicantLanguage = (record = {}, snapshot = {}) => {
-  const recordLanguages = normalizeLanguages(record.languages)
-  const snapshotLanguages = normalizeLanguages(snapshot.languages)
-  const languages = recordLanguages.length ? recordLanguages : snapshotLanguages
-  if (languages.length) {
-    return languages.slice(0, 3).join(', ')
-  }
+  // Languages removed from frontend — always return a neutral label
   return record.languagePreference || snapshot.primaryLanguage || 'Language not shared'
 }
 

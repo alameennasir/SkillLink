@@ -8,9 +8,6 @@ const defaultState = {
   email: '',
   password: '',
   confirmPassword: '',
-  adminDepartment: '',
-  adminTitle: '',
-  phone: '',
   inviteCode: '',
 }
 
@@ -63,9 +60,6 @@ const AuthAdminRegister = () => {
         role: 'admin',
         accountDetails: {
           fullName: formState.fullName,
-          adminDepartment: formState.adminDepartment,
-          adminTitle: formState.adminTitle,
-          phone: formState.phone,
         },
       })
       navigate('/admin', { replace: true })
@@ -81,10 +75,6 @@ const AuthAdminRegister = () => {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-card__header">
-          <div className="auth-badge auth-badge-critical">
-            <Shield size={18} aria-hidden="true" />
-            <span>Admin enrollment</span>
-          </div>
           <h1>Verify leadership invite</h1>
           <p>Admins monitor reports, block scams, and guard payouts. Double-check each detail.</p>
         </div>
@@ -151,38 +141,6 @@ const AuthAdminRegister = () => {
                 autoComplete="new-password"
               />
             </div>
-          </label>
-
-          <div className="auth-grid">
-            <label>
-              <span>Department</span>
-              <input
-                name="adminDepartment"
-                placeholder="Trust & Safety"
-                value={formState.adminDepartment}
-                onChange={handleChange}
-              />
-            </label>
-            <label>
-              <span>Title</span>
-              <input
-                name="adminTitle"
-                placeholder="Lead Investigator"
-                value={formState.adminTitle}
-                onChange={handleChange}
-              />
-            </label>
-          </div>
-
-          <label>
-            <span>Phone (optional)</span>
-            <input
-              type="tel"
-              name="phone"
-              placeholder="+234 800 000 0000"
-              value={formState.phone}
-              onChange={handleChange}
-            />
           </label>
 
           <label>

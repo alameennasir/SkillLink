@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ChevronRight, Loader2, Users } from 'lucide-react'
 import { fetchGigById, subscribeToGigApplications } from '../services/firestoreClient'
 import { isFirebaseConfigured } from '../services/firebaseClient'
@@ -135,7 +135,7 @@ const ClientGigApplicants = () => {
       )}
 
       <div className="gig-applicants-body gig-applicants-standalone">
-        <aside className="gig-applicants-list" aria-label="Applicants list">
+        <section className="gig-applicants-list" aria-label="Applicants list">
           <div className="gig-applicants-list-header">
             <strong>
               {totalApplicants} applicant{totalApplicants === 1 ? '' : 's'}
@@ -167,69 +167,72 @@ const ClientGigApplicants = () => {
               <span>This view updates the moment a freelancer applies.</span>
             </div>
           ) : (
-            <ul className="gig-applicants-list-items">
-              {applicantsState.records.map((record) => {
-                const applicantId = resolveApplicantId(record)
-                const snapshot = record.freelancerSnapshot || {}
-                const tone = resolveApplicantTone(record.status)
-                const nextUrl = `/client/manage-gigs/${gigId}/applicants/${applicantId}`
+            <div className="gig-applicants-table-wrapper">
+              <table className="gig-applicants-table" aria-label="Gig applicants">
+                <thead>
+                  <tr>
+                    <th scope="col">Applicant</th>
+                    <th scope="col">Skills</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {applicantsState.records.map((record) => {
+                    const applicantId = resolveApplicantId(record)
+                    const snapshot = record.freelancerSnapshot || {}
+                    const tone = resolveApplicantTone(record.status)
+                    const nextUrl = `/client/manage-gigs/${gigId}/applicants/${applicantId}`
 
-                return (
-                  <li key={applicantId}>
-                    <Link className="gig-applicant-item" to={nextUrl} state={{ gigTitle: gig?.title }}>
-                      <div className="gig-applicant-copy">
-                        <strong>{snapshot.displayName || 'Freelancer'}</strong>
-                        <span>{snapshot.title || 'No title yet'}</span>
-                        <small>{formatApplicantRelative(record.proposalUpdatedAt)}</small>
-                        {Array.isArray(snapshot.skills) && snapshot.skills.length > 0 && (
-                          <div className="gig-applicant-tags">
-                            {snapshot.skills.slice(0, 3).map((skill) => (
-                              <span key={`${applicantId}-${skill}`}>{skill}</span>
-                            ))}
+                    const navigateToApplicant = () => {
+                      navigate(nextUrl, { state: { gigTitle: gig?.title } })
+                    }
+
+                    const handleRowKeyDown = (event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        navigateToApplicant()
+                      }
+                    }
+
+                    return (
+                      <tr
+                        key={applicantId}
+                        className="gig-applicant-row"
+                        role="link"
+                        tabIndex={0}
+                        onClick={navigateToApplicant}
+                        onKeyDown={handleRowKeyDown}
+                      >
+                        <td>
+                          <div className="gig-applicant-copy">
+                            <strong>{snapshot.displayName || 'Freelancer'}</strong>
+                            <small>{formatApplicantRelative(record.proposalUpdatedAt)}</small>
                           </div>
-                        )}
-                      </div>
-                      <div className="gig-applicant-list-meta">
-                        <span className={`applicant-status-pill is-${tone}`}>
-                          {formatApplicantStatus(record.status)}
-                        </span>
-                        <ChevronRight size={16} aria-hidden="true" />
-                      </div>
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </aside>
-
-        <section className="applicants-side-panel" aria-live="polite">
-          <div className="applicants-side-card">
-            <h3>Open detail pages</h3>
-            <p>
-              Select a freelancer to open an overview page showing their proposal, portfolio, status timeline, and interview
-              link field.
-            </p>
-            <ol>
-              <li>Pick an applicant from the list.</li>
-              <li>Review their dedicated overview page.</li>
-              <li>Share interview links, change statuses, or start a chat.</li>
-            </ol>
-          </div>
-          {gig && (
-            <div className="applicants-side-card">
-              <h4>Gig snapshot</h4>
-              <p>{gig.summary || 'No summary provided yet.'}</p>
-              <div className="applicants-side-meta">
-                <div>
-                  <small>Budget</small>
-                  <strong>{gig.priceRange || gig.budget || 'Not shared'}</strong>
-                </div>
-                <div>
-                  <small>Applicants</small>
-                  <strong>{totalApplicants}</strong>
-                </div>
-              </div>
+                        </td>
+                        <td>
+                          {Array.isArray(snapshot.skills) && snapshot.skills.length > 0 ? (
+                            <div className="gig-applicant-tags">
+                              {snapshot.skills.slice(0, 3).map((skill) => (
+                                <span key={`${applicantId}-${skill}`}>{skill}</span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="gig-applicant-empty">No skills shared</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="gig-applicant-list-meta">
+                            <span className={`applicant-status-pill is-${tone}`}>
+                              {formatApplicantStatus(record.status)}
+                            </span>
+                            <ChevronRight size={16} aria-hidden="true" />
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </section>

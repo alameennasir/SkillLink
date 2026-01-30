@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight, FileText, Link2, Loader2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { fetchFreelancerProposals } from '../services/firestoreClient'
+import { deleteFreelancerProposal, fetchFreelancerProposals } from '../services/firestoreClient'
 
 const statusCopy = {
   draft: 'Draft',
@@ -59,6 +59,18 @@ const FreelancerMyProposals = () => {
 
   const handleView = (gigId) => navigate(`/freelancer/proposals/${gigId}`)
 
+  const handleDelete = async (gigId) => {
+    if (!user?.uid || !gigId) return
+    const confirmDelete = window.confirm('Remove this proposal? This cannot be undone.')
+    if (!confirmDelete) return
+    try {
+      await deleteFreelancerProposal(user.uid, gigId)
+      setProposals((current) => current.filter((proposal) => proposal.id !== gigId))
+    } catch (error) {
+      console.error('Unable to delete proposal', error)
+    }
+  }
+
   return (
     <div className="freelancer-proposals">
       <section className="freelancer-proposals-hero">
@@ -81,7 +93,9 @@ const FreelancerMyProposals = () => {
         </div>
       ) : proposals.length ? (
         <div className="freelancer-proposals-list">
-          {proposals.map((proposal) => (
+          {proposals.map((proposal) => {
+            const gigClosed = proposal.gigStatus === 'deleted' || proposal.gigIsActive === false
+            return (
             <article className="freelancer-proposal-card" key={proposal.id}>
               <header>
                 <div>
@@ -89,16 +103,18 @@ const FreelancerMyProposals = () => {
                   <h3>{proposal.gigTitle}</h3>
                 </div>
                 <span className={`status-pill status-pill--${proposal.status}`}>
-                  {statusCopy[proposal.status] || proposal.status}
+                  {gigClosed ? 'No longer hiring' : statusCopy[proposal.status] || proposal.status}
                 </span>
               </header>
               <p>{proposal.gigSummary}</p>
               <div className="freelancer-proposal-meta">
-                <span>
-                  {proposal.gigBudget} · {proposal.gigType}
-                </span>
-                {proposal.gigTokens ? <span>{proposal.gigTokens} tokens</span> : null}
+                {/* Budget and token details removed from summary view */}
               </div>
+              {gigClosed && (
+                <div className="freelancer-proposal-hint">
+                  This gig is no longer hiring. You can remove this proposal.
+                </div>
+              )}
               {proposal.interviewLink ? (
                 <div className="freelancer-proposal-hint">
                   <Link2 size={14} aria-hidden="true" /> Interview link ready
@@ -106,13 +122,25 @@ const FreelancerMyProposals = () => {
               ) : null}
               <footer>
                 <small>Updated {formatRelative(proposal.updatedAt)}</small>
-                <button type="button" className="ghost-button ghost-compact" onClick={() => handleView(proposal.id)}>
-                  View details
-                  <ArrowRight size={14} aria-hidden="true" />
-                </button>
+                <div className="freelancer-proposal-actions">
+                  <button type="button" className="ghost-button ghost-compact" onClick={() => handleView(proposal.id)}>
+                    View details
+                    <ArrowRight size={14} aria-hidden="true" />
+                  </button>
+                  {gigClosed && (
+                    <button
+                      type="button"
+                      className="ghost-button ghost-compact"
+                      onClick={() => handleDelete(proposal.id)}
+                    >
+                      Delete proposal
+                    </button>
+                  )}
+                </div>
               </footer>
             </article>
-          ))}
+            )
+          })}
         </div>
       ) : (
         <div className="freelancer-proposals-empty">

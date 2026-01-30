@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Image, Paperclip, Search, Send, Smile, X } from 'lucide-react'
+import { Image, Paperclip, Search, Send, Smile, Trash2, UserPlus, X } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
+  acceptProjectGroupInvite,
+  declineProjectGroupInvite,
+  hideThreadForUser,
+  leaveMessagingThread,
+  leaveProjectGroup,
   markThreadAsRead,
   sendThreadMessage,
   subscribeToThreadMessages,
   subscribeToUserThreads,
 } from '../services/firestoreClient'
 import { isFirebaseConfigured } from '../services/firebaseClient'
+import { deriveGroupContext, formatMemberList, isGroupThread, isThreadVisibleToUser } from './messagesUtils'
 
 const FreelancerMessages = () => {
   const { user } = useAuth()
@@ -28,6 +34,9 @@ const FreelancerMessages = () => {
   const [search, setSearch] = useState('')
   const [requestedThreadId, setRequestedThreadId] = useState(location.state?.threadId || null)
   const [composerFiles, setComposerFiles] = useState([])
+  const [threadAction, setThreadAction] = useState(null)
+  const [threadActionFeedback, setThreadActionFeedback] = useState('')
+  const [threadView, setThreadView] = useState('all')
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -94,20 +103,65 @@ const FreelancerMessages = () => {
     return () => unsubscribe?.()
   }, [activeThreadId, user?.uid])
 
+  useEffect(() => {
+    setThreadAction(null)
+    setThreadActionFeedback('')
+  }, [activeThreadId])
+
+  useEffect(() => {
+    if (!activeThreadId) return
+    const current = threads.find((thread) => thread.id === activeThreadId)
+    if (current && isThreadVisibleToUser(current, user?.uid)) {
+      return
+    }
+    const fallback = threads.find((thread) => isThreadVisibleToUser(thread, user?.uid))
+    setActiveThreadId(fallback ? fallback.id : null)
+  }, [threads, activeThreadId, user?.uid])
+
+  const visibleThreads = useMemo(
+    () => threads.filter((thread) => isThreadVisibleToUser(thread, user?.uid)),
+    [threads, user?.uid],
+  )
+
   const filteredThreads = useMemo(() => {
+    const scopedThreads = threadView === 'group'
+      ? visibleThreads.filter((thread) => isGroupThread(thread))
+      : visibleThreads
     const normalized = search.trim().toLowerCase()
-    if (!normalized) return threads
-    return threads.filter((thread) => {
+    if (!normalized) return scopedThreads
+    return scopedThreads.filter((thread) => {
       const partner = getPartnerSnapshot(thread, user?.uid)
       const haystack = [partner.name, thread.subject, thread.gigTitle, thread.lastMessage]
       return haystack.some((text) => text?.toLowerCase().includes(normalized))
     })
-  }, [threads, search, user?.uid])
+  }, [visibleThreads, search, user?.uid, threadView])
+
+  useEffect(() => {
+    if (!filteredThreads.length) {
+      setActiveThreadId(null)
+      return
+    }
+    if (!filteredThreads.some((thread) => thread.id === activeThreadId)) {
+      setActiveThreadId(filteredThreads[0].id)
+    }
+  }, [filteredThreads, activeThreadId])
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) || null,
     [threads, activeThreadId],
   )
+  const activePartnerSnapshot = useMemo(() => getPartnerSnapshot(activeThread, user?.uid), [activeThread, user?.uid])
+  const groupContext = useMemo(() => deriveGroupContext(activeThread, user?.uid), [activeThread, user?.uid])
+  const pendingInviteLabel = useMemo(
+    () => formatMemberList(groupContext.pendingMembers, { emptyFallback: '' }),
+    [groupContext.pendingMembers],
+  )
+  const activeMemberLabel = useMemo(
+    () => formatMemberList(groupContext.activeMembers, { emptyFallback: 'Project chat' }),
+    [groupContext.activeMembers],
+  )
+  const showPendingBanner = groupContext.isGroup && groupContext.pendingMembers.length > 0 && groupContext.viewerRole === 'owner'
+  const viewerInvitePending = groupContext.viewerInviteStatus === 'pending'
 
   const handleSelectThread = (threadId) => {
     setActiveThreadId(threadId)
@@ -118,7 +172,7 @@ const FreelancerMessages = () => {
   }
 
   const handleAttachClick = () => {
-    if (!activeThreadId || sending || !isFirebaseConfigured) return
+    if (!activeThreadId || sending || viewerInvitePending || !isFirebaseConfigured) return
     fileInputRef.current?.click()
   }
 
@@ -159,10 +213,89 @@ const FreelancerMessages = () => {
     }
   }
 
+  const handleAcceptInvite = async () => {
+    if (!groupContext.groupId || !user?.uid) return
+    setThreadAction('accept')
+    setThreadActionFeedback('')
+    try {
+      await acceptProjectGroupInvite({ groupId: groupContext.groupId, freelancerId: user.uid })
+      setThreadActionFeedback('Invite accepted. You can start replying now.')
+    } catch (error) {
+      setThreadActionFeedback(error?.message || 'Unable to accept the invite right now.')
+    } finally {
+      setThreadAction(null)
+    }
+  }
+
+  const handleDeclineInvite = async () => {
+    if (!groupContext.groupId || !user?.uid) return
+    setThreadAction('decline')
+    setThreadActionFeedback('')
+    try {
+      await declineProjectGroupInvite({ groupId: groupContext.groupId, freelancerId: user.uid })
+      setThreadActionFeedback('Invite declined. This chat will disappear shortly.')
+      setActiveThreadId(null)
+    } catch (error) {
+      setThreadActionFeedback(error?.message || 'Unable to decline the invite right now.')
+    } finally {
+      setThreadAction(null)
+    }
+  }
+
+  const handleDeleteThreadForMe = async () => {
+    if (!activeThreadId || !user?.uid) return
+    setThreadAction('deleteForMe')
+    setThreadActionFeedback('')
+    try {
+      await hideThreadForUser({ threadId: activeThreadId, userId: user.uid })
+      setThreadActionFeedback('Conversation removed from your inbox.')
+      setActiveThreadId(null)
+    } catch (error) {
+      setThreadActionFeedback(error?.message || 'Unable to remove the conversation right now.')
+    } finally {
+      setThreadAction(null)
+    }
+  }
+
+  const handleExitGroup = async () => {
+    if (!groupContext.groupId || !activeThreadId || !user?.uid) return
+    setThreadAction('exitGroup')
+    setThreadActionFeedback('')
+    try {
+      await Promise.all([
+        leaveProjectGroup({ groupId: groupContext.groupId, memberId: user.uid }),
+        leaveMessagingThread({ threadId: activeThreadId, userId: user.uid }),
+      ])
+      setThreadActionFeedback('You left the group. This chat will disappear shortly.')
+      setActiveThreadId(null)
+    } catch (error) {
+      setThreadActionFeedback(error?.message || 'Unable to leave the group right now.')
+    } finally {
+      setThreadAction(null)
+    }
+  }
+
   const sidebarEmptyCopy = !isFirebaseConfigured
     ? 'Configure Firebase to unlock SkillLink messaging.'
     : 'No chats yet. Apply to gigs or respond to invites to start the conversation.'
   const composerHasPayload = Boolean(composer.trim()) || composerFiles.length > 0
+  const composerDisabled = !activeThread || sending || !isFirebaseConfigured || viewerInvitePending
+  const composerPlaceholder = !isFirebaseConfigured
+    ? 'Configure Firebase to enable messaging'
+    : !activeThread
+      ? 'Select a thread to start typing'
+      : viewerInvitePending
+        ? 'Accept the invite to start chatting'
+        : 'Send an update'
+  const threadDisplayName = groupContext.isGroup ? groupContext.name : activePartnerSnapshot.name
+  const threadSubtitle = groupContext.isGroup
+    ? activeMemberLabel
+    : activeThread?.gigTitle || activeThread?.subject || 'SkillLink conversation'
+  const threadAvatarInitials = groupContext.isGroup ? getInitials(groupContext.name) : activePartnerSnapshot.initials
+  const acceptBusy = threadAction === 'accept'
+  const declineBusy = threadAction === 'decline'
+  const deleteForMeBusy = threadAction === 'deleteForMe'
+  const exitGroupBusy = threadAction === 'exitGroup'
 
   return (
     <div className="freelancer-page">
@@ -171,14 +304,19 @@ const FreelancerMessages = () => {
           <div className="messages-sidebar-head">
             <h2>Messages</h2>
             <div className="messages-view-toggle">
-              <button type="button" className="messages-view-tab is-active">
+              <button
+                type="button"
+                className={`messages-view-tab ${threadView === 'all' ? 'is-active' : ''}`}
+                onClick={() => setThreadView('all')}
+              >
                 All
               </button>
-              <button type="button" className="messages-view-tab" disabled>
-                Unread
-              </button>
-              <button type="button" className="messages-view-tab" disabled>
-                Archived
+              <button
+                type="button"
+                className={`messages-view-tab ${threadView === 'group' ? 'is-active' : ''}`}
+                onClick={() => setThreadView('group')}
+              >
+                Groups
               </button>
             </div>
           </div>
@@ -189,7 +327,7 @@ const FreelancerMessages = () => {
               placeholder="Search clients or gigs"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              disabled={!threads.length}
+              disabled={!visibleThreads.length}
             />
           </label>
 
@@ -220,15 +358,18 @@ const FreelancerMessages = () => {
                       <div className="thread-avatar" aria-hidden="true">
                         {partner.initials}
                       </div>
-                      <div>
+                      <div className="messages-thread-body">
                         <div className="messages-thread-head">
                           <strong>{partner.name}</strong>
                           <span>{formatListTimestamp(thread.updatedAt)}</span>
                         </div>
                         <p className="messages-thread-meta">{thread.gigTitle || thread.subject || 'Project chat'}</p>
-                        <small className={`messages-thread-preview ${unread ? 'is-unread' : ''}`}>
-                          {thread.lastMessage || 'Say hello'}
-                        </small>
+                        <div className="messages-thread-preview-row">
+                          {unread && <span className="messages-thread-unread-dot" aria-hidden="true" />}
+                          <small className={`messages-thread-preview ${unread ? 'is-unread' : ''}`}>
+                            {thread.lastMessage || 'Say hello'}
+                          </small>
+                        </div>
                       </div>
                     </button>
                   </li>
@@ -241,15 +382,28 @@ const FreelancerMessages = () => {
         <div className="messages-thread-view" aria-label="Active conversation">
           <header className="thread-view-head">
             {activeThread ? (
-              <div className="thread-view-contact">
-                <div className="thread-avatar" aria-hidden="true">
-                  {getPartnerSnapshot(activeThread, user?.uid).initials}
+              <>
+                <div className="thread-view-contact">
+                  <div className="thread-avatar" aria-hidden="true">
+                    {threadAvatarInitials}
+                  </div>
+                  <div>
+                    <strong>{threadDisplayName}</strong>
+                    <p>{threadSubtitle}</p>
+                  </div>
                 </div>
-                <div>
-                  <strong>{getPartnerSnapshot(activeThread, user?.uid).name}</strong>
-                  <p>{activeThread.gigTitle || 'SkillLink conversation'}</p>
+                <div className="thread-view-actions">
+                  <button
+                    type="button"
+                    className="thread-icon-btn"
+                    aria-label="Delete conversation"
+                    onClick={handleDeleteThreadForMe}
+                    disabled={deleteForMeBusy}
+                  >
+                    <Trash2 size={16} aria-hidden="true" />
+                  </button>
                 </div>
-              </div>
+              </>
             ) : (
               <div className="thread-view-contact">
                 <div className="thread-avatar" aria-hidden="true">
@@ -257,7 +411,7 @@ const FreelancerMessages = () => {
                 </div>
                 <div>
                   <strong>No thread selected</strong>
-                  <p>Messages with Lagos, Abuja, and remote clients will appear here.</p>
+                  <p>Messages with clients will appear here.</p>
                 </div>
               </div>
             )}
@@ -275,7 +429,6 @@ const FreelancerMessages = () => {
             ) : !activeThread ? (
               <div className="thread-empty-state">
                 <p>Select a thread to read client updates.</p>
-                <small>New replies sync instantly from Firestore.</small>
               </div>
             ) : messages.length === 0 ? (
               <div className="thread-empty-state">
@@ -308,7 +461,44 @@ const FreelancerMessages = () => {
             )}
           </div>
 
-          <form className="thread-composer" onSubmit={handleSendMessage} aria-disabled={!activeThread || !isFirebaseConfigured}>
+          {activeThread && (showPendingBanner || viewerInvitePending) && (
+            <div className={`thread-system-banner ${viewerInvitePending ? 'is-warning' : ''}`}>
+              <UserPlus size={16} aria-hidden="true" />
+              {viewerInvitePending ? (
+                <div className="thread-banner-content">
+                  <p>Accept the invite to unlock replies in this project group.</p>
+                  <div className="thread-banner-actions">
+                    <button
+                      type="button"
+                      className="profile-ghost-btn"
+                      disabled={declineBusy}
+                      onClick={handleDeclineInvite}
+                    >
+                      {declineBusy ? 'Declining…' : 'Decline'}
+                    </button>
+                    <button
+                      type="button"
+                      className="profile-primary-btn"
+                      disabled={acceptBusy}
+                      onClick={handleAcceptInvite}
+                    >
+                      {acceptBusy ? 'Joining…' : 'Accept invite'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="thread-banner-content">
+                  <p>
+                    Waiting for <strong>{pendingInviteLabel || 'invited teammates'}</strong> to accept their invites.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {threadActionFeedback && <p className="thread-action-feedback">{threadActionFeedback}</p>}
+
+          <form className="thread-composer" onSubmit={handleSendMessage} aria-disabled={composerDisabled}>
             <input
               type="file"
               multiple
@@ -321,16 +511,16 @@ const FreelancerMessages = () => {
                 type="button"
                 aria-label="Attach file"
                 onClick={handleAttachClick}
-                disabled={!activeThread || sending || !isFirebaseConfigured}
+                disabled={composerDisabled}
               >
                 <Paperclip size={18} aria-hidden="true" />
               </button>
-              <button type="button" aria-label="Insert image" disabled>
+              {/* <button type="button" aria-label="Insert image" disabled>
                 <Image size={18} aria-hidden="true" />
               </button>
               <button type="button" aria-label="Add emoji" disabled>
                 <Smile size={18} aria-hidden="true" />
-              </button>
+              </button> */}
             </div>
             {composerFiles.length > 0 && (
               <div className="composer-attachment-preview">
@@ -346,22 +536,16 @@ const FreelancerMessages = () => {
             )}
             <input
               type="text"
-              placeholder={
-                !isFirebaseConfigured
-                  ? 'Configure Firebase to enable messaging'
-                  : activeThread
-                    ? 'Send an update'
-                    : 'Select a thread to start typing'
-              }
+              placeholder={composerPlaceholder}
               value={composer}
               onChange={(event) => setComposer(event.target.value)}
-              disabled={!activeThread || sending || !isFirebaseConfigured}
+              disabled={composerDisabled}
             />
             <button
               type="submit"
               className="thread-send"
               aria-label="Send message"
-              disabled={!activeThread || sending || !composerHasPayload || !isFirebaseConfigured}
+              disabled={composerDisabled || !composerHasPayload}
             >
               <Send size={18} aria-hidden="true" />
             </button>
@@ -377,6 +561,10 @@ export default FreelancerMessages
 const getPartnerSnapshot = (thread, userId) => {
   if (!thread) {
     return { name: 'Conversation', initials: 'SL' }
+  }
+  if (isGroupThread(thread)) {
+    const groupName = thread.metadata?.group?.name || thread.subject || thread.gigTitle || 'Project chat'
+    return { name: groupName, initials: getInitials(groupName) }
   }
   if (thread.partnerName) {
     return { name: thread.partnerName, initials: getInitials(thread.partnerName) }

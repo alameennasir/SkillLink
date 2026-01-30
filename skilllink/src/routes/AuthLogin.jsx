@@ -60,12 +60,8 @@ const AuthLogin = () => {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-card__header">
-          <div className="auth-badge">
-            <Sparkles size={18} />
-            <span>SkillLink Access</span>
-          </div>
           <h1>Welcome back</h1>
-          <p>Sign in to review gigs, manage applicants, and keep your pipeline moving.</p>
+          <p>Sign in as Client or Freelancer.</p>
         </div>
 
         {formError && <div className="auth-alert">{formError}</div>}
@@ -112,9 +108,9 @@ const AuthLogin = () => {
           <p>
             Need an account? <Link to="/auth/register">Create your SkillLink account</Link>
           </p>
-          <p className="auth-footnote">
+          {/* <p className="auth-footnote">
             Admin team? <Link to="/auth/admin/register">Request admin access</Link> or sign in here to jump to /admin.
-          </p>
+          </p> */}
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
-import { getDownloadURL, getStorage, ref, uploadBytes } from 'firebase/storage'
-import { getFirebaseApp, isFirebaseConfigured, requireFirebaseConfig } from './firebaseClient'
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
+import { getFirebaseStorage, isFirebaseConfigured, requireFirebaseConfig } from './firebaseClient'
 
 const randomId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -142,7 +142,7 @@ export const uploadGigThumbnail = async ({ clientId, file }) => {
   }
 
   requireFirebaseConfig()
-  const storage = getStorage(getFirebaseApp())
+  const storage = getFirebaseStorage()
   const assetId = randomId()
   const path = `gigs/${clientId}/thumbnails/${assetId}-${file.name}`
   const fileRef = ref(storage, path)
@@ -170,7 +170,7 @@ export const uploadProposalAsset = async ({ userId, gigId, file, category = 'att
 
   const bucketCategory = normalizeCategory(category)
   requireFirebaseConfig()
-  const storage = getStorage(getFirebaseApp())
+  const storage = getFirebaseStorage()
   const assetId = randomId()
   const path = `proposals/${userId}/${gigId}/${bucketCategory}/${assetId}-${file.name}`
   const fileRef = ref(storage, path)
@@ -202,7 +202,7 @@ export const uploadFreelancerPortfolioAsset = async ({ userId, file }) => {
   }
 
   requireFirebaseConfig()
-  const storage = getStorage(getFirebaseApp())
+  const storage = getFirebaseStorage()
   const assetId = randomId()
   const folder = file.type?.startsWith('video/') ? 'videos' : 'images'
   const path = `users/${userId}/portfolio/${folder}/${assetId}-${file.name}`
@@ -230,7 +230,7 @@ export const uploadThreadAttachment = async ({ threadId, senderId, file }) => {
   }
 
   requireFirebaseConfig()
-  const storage = getStorage(getFirebaseApp())
+  const storage = getFirebaseStorage()
   const assetId = randomId()
   const path = `threads/${threadId}/${senderId}/${assetId}-${file.name}`
   const fileRef = ref(storage, path)

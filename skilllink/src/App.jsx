@@ -1,5 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './App.css'
+import './styles/client.css'
+import './styles/freelancer.css'
 import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
 import ClientLayout from './layouts/ClientLayout'
@@ -17,6 +19,7 @@ import ClientTalentSearch from './routes/ClientTalentSearch'
 import ClientGigApplicants from './routes/ClientGigApplicants'
 import ClientApplicantOverview from './routes/ClientApplicantOverview'
 import FreelancerDashboard from './routes/FreelancerDashboard'
+import ClientProfile from './routes/ClientProfile'
 import FreelancerGigDetail from './routes/FreelancerGigDetail'
 import FreelancerMessages from './routes/FreelancerMessages'
 import FreelancerMyGigs from './routes/FreelancerMyGigs'
@@ -27,6 +30,7 @@ import FreelancerProposalDetail from './routes/FreelancerProposalDetail'
 import FreelancerOnboarding from './routes/FreelancerOnboarding'
 import Landing from './routes/Landing'
 import AdminDashboard from './routes/AdminDashboard'
+import AdminUsers from './routes/AdminUsers'
 
 function App() {
   return (
@@ -73,6 +77,7 @@ function App() {
             />
             <Route path="talent-search" element={<ClientTalentSearch />} />
             <Route path="messages" element={<ClientMessages />} />
+            <Route path="profile" element={<ClientProfile />} />
             <Route path="*" element={<Navigate to="/client" replace />} />
           </Route>
 
@@ -104,6 +109,7 @@ function App() {
               }
             >
               <Route index element={<AdminDashboard />} />
+              <Route path="users" element={<AdminUsers />} />
               <Route path="dashboard" element={<Navigate to="/admin" replace />} />
             </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

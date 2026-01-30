@@ -1,15 +1,24 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Ban, CheckCircle2, Loader2, RefreshCcw, Shield, Users } from 'lucide-react'
-import { blockAccount, fetchAdminOverview, liftBlock, resolveReport } from '../services/adminService'
+import { AlertCircle, Ban, CheckCircle2, Loader2, RefreshCcw, Shield } from 'lucide-react'
+import { fetchAdminOverview, resolveReport } from '../services/adminService'
+import useAdminBlockActions from '../hooks/useAdminBlockActions'
 
 const AdminDashboard = () => {
   const [overview, setOverview] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [reports, setReports] = useState([])
-  const [activity, setActivity] = useState([])
-  const [blockForm, setBlockForm] = useState({ accountId: '', reason: '' })
-  const [blockStatus, setBlockStatus] = useState('idle')
+  const {
+    form: blockForm,
+    status: blockStatus,
+    action: blockAction,
+    error: blockError,
+    updateField,
+    blockByEmail,
+    restoreByEmail,
+    blockByAccountId,
+    clearError: clearBlockError,
+  } = useAdminBlockActions()
 
   useEffect(() => {
     let mounted = true
@@ -21,7 +30,6 @@ const AdminDashboard = () => {
         if (!mounted) return
         setOverview(data.metrics)
         setReports(data.reports)
-        setActivity(data.activity)
       } catch (err) {
         if (!mounted) return
         setError(err?.message || 'Unable to load admin data.')
@@ -53,43 +61,13 @@ const AdminDashboard = () => {
   }
 
   const handleBlockReporter = async (accountId) => {
-    if (!accountId) return
-    setError('')
-    try {
-      await blockAccount({ accountId, reason: 'Flagged via admin queue' })
-    } catch (err) {
-      setError(err?.message || 'Unable to block reported account.')
-    }
+    await blockByAccountId(accountId)
   }
 
-  const handleBlockAccount = async (event) => {
+  const handleBlockAccount = (event) => {
     event.preventDefault()
-    if (!blockForm.accountId.trim()) {
-      setError('Enter an account ID before taking action.')
-      return
-    }
-    setBlockStatus('pending')
-    setError('')
-    try {
-      await blockAccount({ accountId: blockForm.accountId.trim(), reason: blockForm.reason })
-      setBlockForm({ accountId: '', reason: '' })
-    } catch (err) {
-      setError(err?.message || 'Unable to block account right now.')
-    } finally {
-      setBlockStatus('idle')
-    }
-  }
-
-  const handleLiftBlock = async (accountId) => {
-    setBlockStatus('pending')
-    setError('')
-    try {
-      await liftBlock(accountId)
-    } catch (err) {
-      setError(err?.message || 'Unable to restore account.')
-    } finally {
-      setBlockStatus('idle')
-    }
+    clearBlockError()
+    blockByEmail()
   }
 
   return (
@@ -179,16 +157,17 @@ const AdminDashboard = () => {
       <section className="admin-section admin-two-column">
         <article className="admin-panel">
           <h3>Block or restore accounts</h3>
-          <p>Respond to scam alerts directly from the console.</p>
+          <p>Respond to scam alerts directly from the console using email lookups.</p>
 
           <form className="admin-block-form" onSubmit={handleBlockAccount}>
             <label>
-              <span>Account ID</span>
+              <span>Account email</span>
               <input
-                name="accountId"
-                placeholder="freelancer_446"
-                value={blockForm.accountId}
-                onChange={(event) => setBlockForm((prev) => ({ ...prev, accountId: event.target.value }))}
+                name="email"
+                type="email"
+                placeholder="talent@example.com"
+                value={blockForm.email}
+                onChange={(event) => updateField('email', event.target.value)}
                 required
               />
             </label>
@@ -199,45 +178,27 @@ const AdminDashboard = () => {
                 name="reason"
                 placeholder="Explain why this account is being blocked."
                 value={blockForm.reason}
-                onChange={(event) => setBlockForm((prev) => ({ ...prev, reason: event.target.value }))}
+                onChange={(event) => updateField('reason', event.target.value)}
               />
             </label>
+            {blockError && <p className="admin-panel-error" style={{ padding: '0.65rem 0.85rem' }}>{blockError}</p>}
             <div className="admin-block-actions">
               <button type="submit" className="admin-danger" disabled={blockStatus === 'pending'}>
-                {blockStatus === 'pending' ? 'Processing…' : 'Block account'}
+                {blockStatus === 'pending' && blockAction !== 'restore' ? 'Processing…' : 'Block account'}
               </button>
               <button
                 type="button"
                 className="admin-secondary"
-                disabled={!blockForm.accountId || blockStatus === 'pending'}
-                onClick={() => handleLiftBlock(blockForm.accountId)}
+                disabled={!blockForm.email || blockStatus === 'pending'}
+                onClick={() => {
+                  clearBlockError()
+                  restoreByEmail()
+                }}
               >
-                Restore access
+                {blockStatus === 'pending' && blockAction === 'restore' ? 'Restoring…' : 'Restore access'}
               </button>
             </div>
           </form>
-        </article>
-
-        <article className="admin-panel">
-          <div className="admin-section-header">
-            <div>
-              <h3>Live activity feed</h3>
-              <p>Continuous signal from abuse automation.</p>
-            </div>
-            <Users size={16} aria-hidden="true" />
-          </div>
-          {activity.length === 0 ? (
-            <div className="admin-empty">Automation feed is quiet.</div>
-          ) : (
-            <ul className="admin-activity">
-              {activity.map((event) => (
-                <li key={event.id}>
-                  <p>{event.message}</p>
-                  <small>{event.timestamp}</small>
-                </li>
-              ))}
-            </ul>
-          )}
         </article>
       </section>
     </div>

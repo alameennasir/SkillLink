@@ -25,31 +25,21 @@ const resolveGigTags = (gig) => {
 
 const quickFilters = [
   {
+    id: 'all',
+    label: 'All',
+    predicate: () => true,
+  },
+  {
     id: 'verified-clients',
     label: 'Verified clients',
     predicate: (gig) => Boolean(gig.client?.verified),
-  },
-  {
-    id: 'token-boost',
-    label: 'Token boost (2+)',
-    predicate: (gig) => (gig.tokens ?? 0) >= 2,
-  },
-  {
-    id: 'fixed-price',
-    label: 'Fixed price',
-    predicate: (gig) => normalizeText(gig.priceType).includes('fixed'),
-  },
-  {
-    id: 'remote-friendly',
-    label: 'Remote friendly',
-    predicate: (gig) => normalizeText(gig.client?.location).includes('remote'),
   },
 ]
 
 const FreelancerOpportunities = () => {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const [activeFilters, setActiveFilters] = useState([])
+  const [activeFilters, setActiveFilters] = useState(['all'])
   const [records, setRecords] = useState([])
   const [status, setStatus] = useState(isFirebaseConfigured ? 'loading' : 'error')
   const [error, setError] = useState(
@@ -85,7 +75,7 @@ const FreelancerOpportunities = () => {
     }
 
     const matchesFilters = (gig) => {
-      if (!activeFilters.length) return true
+      if (!activeFilters.length || activeFilters.includes('all')) return true
       return activeFilters.every((filterId) => {
         const filter = quickFilters.find((item) => item.id === filterId)
         return filter ? filter.predicate(gig) : true
@@ -96,18 +86,22 @@ const FreelancerOpportunities = () => {
   }, [records, query, activeFilters])
 
   const toggleFilter = (filterId) => {
-    setActiveFilters((current) =>
-      current.includes(filterId) ? current.filter((id) => id !== filterId) : [...current, filterId],
-    )
+    setActiveFilters((current) => {
+      if (filterId === 'all') return ['all']
+      const withoutAll = current.filter((id) => id !== 'all')
+      return withoutAll.includes(filterId)
+        ? withoutAll.filter((id) => id !== filterId)
+        : [...withoutAll, filterId]
+    })
   }
 
   const clearFilters = () => {
     setQuery('')
-    setActiveFilters([])
+    setActiveFilters(['all'])
   }
 
   const clearSearch = () => setQuery('')
-  const hasActiveFilters = Boolean(query || activeFilters.length)
+  const hasActiveFilters = Boolean(query || activeFilters.some((filter) => filter !== 'all'))
   const isLoading = status === 'loading'
   const showEmptyState = !isLoading && !filteredGigs.length
 
@@ -118,7 +112,6 @@ const FreelancerOpportunities = () => {
   return (
     <div className="freelancer-opportunities">
       <header className="opportunities-hero">
-        <p>Browse Gigs</p>
         <h1>Find your next gig</h1>
         <span>Explore vetted briefs from Nigerian startups, NGOs, and creative teams.</span>
       </header>
@@ -170,9 +163,8 @@ const FreelancerOpportunities = () => {
         <>
           <div className="opportunities-grid">
             {filteredGigs.map((gig) => {
-              const thumbnail = gig.thumbnail || fallbackGigThumbnail
-              const priceType = gig.priceType || 'Flexible budget'
-              const priceRange = gig.priceRange || gig.budget || 'Budget shared privately'
+              const thumbnail = gig.thumbnail || gig.creative?.url || fallbackGigThumbnail
+              // priceType/priceRange removed — budget and price metadata hidden
               const clientName = gig.client?.name || 'SkillLink client'
               const clientRating = gig.client?.rating || 'New'
               const tags = resolveGigTags(gig)
@@ -181,16 +173,16 @@ const FreelancerOpportunities = () => {
                 <article className="opportunities-card" key={gig.id}>
                   <div className="opportunities-card-media" aria-hidden="true">
                     <img src={thumbnail} alt="" />
-                    <span className="opportunities-card-badge">{priceType}</span>
+                    {/* <span className="opportunities-card-badge">{priceType}</span> */}
                   </div>
                   <div className="opportunities-card-body">
                     <div className="opportunities-card-head">
                       <h3>{gig.title || 'Untitled gig'}</h3>
-                      <span>{priceRange}</span>
+                      {/* <span>{priceRange}</span> */}
                     </div>
-                    <p>
+                    {/* <p>
                       {clientName} • {clientRating} rating
-                    </p>
+                    </p> */}
                     <div className="opportunities-card-tags">
                       {tags.map((tag) => (
                         <span key={`${gig.id}-${tag}`}>{tag}</span>

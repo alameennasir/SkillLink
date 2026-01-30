@@ -5,7 +5,6 @@ const Landing = () => {
   return (
     <div className="landing-shell">
       <header className="landing-hero">
-        <p className="landing-pill">Nigerian talent x verified work</p>
         <h1>
           Build once. <span>Hire fast.</span>
         </h1>

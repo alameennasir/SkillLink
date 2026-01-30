@@ -120,12 +120,12 @@ const FreelancerMyGigs = () => {
                 <div>
                   <p>{proposal.gigClient}</p>
                   <h3>{proposal.gigTitle}</h3>
-                  <span>{proposal.gigType || 'Fixed scope'}</span>
+                  {/* <span>{proposal.gigType || 'Fixed scope'}</span> */}
                 </div>
                 <span className="freelancer-my-gig-status">{statusLabel[proposal.status] || proposal.status}</span>
               </header>
               <footer>
-                <div className="freelancer-my-gig-date">{proposal.gigDeadline || 'Timeline TBD'}</div>
+                <div className="freelancer-my-gig-date">{proposal.gigDeadline || ''}</div>
                 <button type="button" onClick={() => goToProposal(proposal.id)}>
                   View details
                 </button>

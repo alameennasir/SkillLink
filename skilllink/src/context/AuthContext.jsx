@@ -123,7 +123,13 @@ const mapUser = (firebaseUser, profile) => ({
 export const useAuth = () => {
   const context = useContext(AuthContext)
   if (!context) {
-    throw new Error('useAuth must be used inside AuthProvider')
+    // During HMR or transient renders consumers may attempt to call `useAuth`
+    // before the provider is reattached. Log a warning and return a safe
+    // fallback so components don't crash; ProtectedRoute will treat this as
+    // a loading state.
+    // eslint-disable-next-line no-console
+    console.warn('useAuth called without AuthProvider; returning fallback auth state')
+    return { status: 'loading', user: null, error: new Error('AuthProvider missing') }
   }
   return context
 }

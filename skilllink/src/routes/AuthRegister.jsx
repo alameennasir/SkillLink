@@ -1,4 +1,4 @@
-import { ArrowLeft, Layers3, Lock, Mail, Users } from 'lucide-react'
+import { ArrowLeft, Briefcase, Layers3, Lock, Mail, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
@@ -13,15 +13,13 @@ const clientInitial = {
   companyName: '',
   entityType: 'company',
   industry: '',
-  hiringFocus: '',
 }
 
 const freelancerInitial = {
   fullName: '',
+  title: '',
   skills: '',
   experienceLevel: 'intermediate',
-  portfolioUrl: '',
-  hourlyRate: '',
 }
 
 const AuthRegister = () => {
@@ -189,21 +187,6 @@ const AuthRegister = () => {
             <fieldset className="auth-role-fieldset">
               <legend>I want to join as</legend>
               <div className="auth-role-options">
-                <label className={`auth-role-card ${role === 'client' ? 'auth-role-card-active' : ''}`}>
-                  <input
-                    type="radio"
-                    name="role"
-                    value="client"
-                    checked={role === 'client'}
-                    onChange={() => setRole('client')}
-                  />
-                  <div>
-                    <Users size={20} />
-                    <strong>Client</strong>
-                    <p>Hire talent, manage gigs, and collaborate with vetted freelancers.</p>
-                  </div>
-                </label>
-
                 <label className={`auth-role-card ${role === 'freelancer' ? 'auth-role-card-active' : ''}`}>
                   <input
                     type="radio"
@@ -216,6 +199,21 @@ const AuthRegister = () => {
                     <Layers3 size={20} />
                     <strong>Freelancer</strong>
                     <p>Showcase skills, apply to briefs, and keep your pipeline organised.</p>
+                  </div>
+                </label>
+
+                <label className={`auth-role-card ${role === 'client' ? 'auth-role-card-active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="role"
+                    value="client"
+                    checked={role === 'client'}
+                    onChange={() => setRole('client')}
+                  />
+                  <div>
+                    <Users size={20} />
+                    <strong>Client</strong>
+                    <p>Hire talent, manage gigs, and collaborate with vetted freelancers.</p>
                   </div>
                 </label>
               </div>
@@ -261,18 +259,6 @@ const AuthRegister = () => {
                     onChange={handleClientChange}
                   />
                 </label>
-
-                <label>
-                  <span>What do you want to hire for?</span>
-                  <textarea
-                    className="auth-textarea"
-                    name="hiringFocus"
-                    placeholder="Example: Need a product designer to polish MVP flows."
-                    value={clientData.hiringFocus}
-                    onChange={handleClientChange}
-                    rows={3}
-                  />
-                </label>
               </>
             ) : (
               <>
@@ -284,6 +270,20 @@ const AuthRegister = () => {
                       name="fullName"
                       placeholder="Chioma Ajayi"
                       value={freelancerData.fullName}
+                      onChange={handleFreelancerChange}
+                      required
+                    />
+                  </div>
+                </label>
+
+                <label>
+                  <span>Title</span>
+                  <div className="auth-input">
+                    <Briefcase size={18} />
+                    <input
+                      name="title"
+                      placeholder="Product Designer"
+                      value={freelancerData.title}
                       onChange={handleFreelancerChange}
                       required
                     />
@@ -312,34 +312,8 @@ const AuthRegister = () => {
                   >
                     <option value="beginner">Beginner</option>
                     <option value="intermediate">Intermediate</option>
-                    <option value="senior">Senior</option>
-                    <option value="lead">Lead</option>
+                    <option value="professional">Professional</option>
                   </select>
-                </label>
-
-                <label>
-                  <span>Portfolio or website (optional)</span>
-                  <input
-                    className="auth-field-control"
-                    name="portfolioUrl"
-                    placeholder="https://"
-                    value={freelancerData.portfolioUrl}
-                    onChange={handleFreelancerChange}
-                  />
-                </label>
-
-                <label>
-                  <span>Hourly rate (optional)</span>
-                  <input
-                    className="auth-field-control"
-                    type="number"
-                    min="0"
-                    step="1"
-                    name="hourlyRate"
-                    placeholder="e.g. 15000"
-                    value={freelancerData.hourlyRate}
-                    onChange={handleFreelancerChange}
-                  />
                 </label>
               </>
             )}

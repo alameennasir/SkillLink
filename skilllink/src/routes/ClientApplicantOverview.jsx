@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, Link2, Loader2, MessageSquare } from 'lucide-react'
+import { ArrowLeft, ExternalLink, Link2, Loader2, MessageSquare, X } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
   createMessagingThread,
+  fetchFreelancerProfile,
   fetchGigById,
   subscribeToGigApplicant,
   updateGigApplicantInterviewLink,
@@ -14,8 +15,6 @@ import {
   formatApplicantRelative,
   formatApplicantStatus,
   getInitials,
-  resolveApplicantLanguage,
-  resolveApplicantLocalTime,
   resolveApplicantTone,
   resolveApplicantId,
 } from './clientApplicantHelpers'
@@ -29,8 +28,11 @@ const ClientApplicantOverview = () => {
   const [gigError, setGigError] = useState(null)
   const [recordState, setRecordState] = useState({ status: 'loading', record: null, error: null })
   const [interviewDraft, setInterviewDraft] = useState('')
+  const [interviewScheduleDraft, setInterviewScheduleDraft] = useState('')
   const [notice, setNotice] = useState(null)
   const [action, setAction] = useState(null)
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false)
+  const [freelancerProfile, setFreelancerProfile] = useState(null)
 
   useEffect(() => {
     if (!gigId) return
@@ -93,6 +95,7 @@ const ClientApplicantOverview = () => {
         }
         setRecordState({ status: 'ready', record, error: null })
         setInterviewDraft(record.interviewLink || '')
+        setInterviewScheduleDraft(toLocalDatetimeInput(record.interviewSchedule || record.milestones?.interviewAt))
       },
       {
         onError: (error) => {
@@ -108,18 +111,92 @@ const ClientApplicantOverview = () => {
 
   const applicantRecord = recordState.record
   const applicantSnapshot = applicantRecord?.freelancerSnapshot || {}
+  const applicantFreelancerId = useMemo(() => resolveApplicantId(applicantRecord) || applicantId || null, [applicantRecord, applicantId])
+
+  useEffect(() => {
+    if (!applicantRecord) {
+      setIsProfileModalOpen(false)
+    }
+  }, [applicantRecord])
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) {
+      setFreelancerProfile(null)
+      return () => {}
+    }
+    if (!applicantFreelancerId) {
+      setFreelancerProfile(null)
+      return () => {}
+    }
+    let active = true
+    fetchFreelancerProfile(applicantFreelancerId)
+      .then((profile) => {
+        if (!active) return
+        setFreelancerProfile(profile ? { ...profile, uid: profile.uid || applicantFreelancerId } : null)
+      })
+      .catch((error) => {
+        if (!active) return
+        console.warn('Unable to fetch freelancer profile', error)
+        setFreelancerProfile(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [applicantFreelancerId])
 
   const applicantSkills = useMemo(() => {
-    if (!Array.isArray(applicantSnapshot.skills)) return []
-    return applicantSnapshot.skills.filter(Boolean)
-  }, [applicantSnapshot.skills])
+    const source = Array.isArray(freelancerProfile?.skills) && freelancerProfile.skills.length
+      ? freelancerProfile.skills
+      : applicantSnapshot.skills
+    if (!Array.isArray(source)) return []
+    return source.filter(Boolean)
+  }, [freelancerProfile?.skills, applicantSnapshot.skills])
+
+  const profilePortfolioItems = useMemo(() => {
+    const featuredEntries = Array.isArray(freelancerProfile?.featured) && freelancerProfile.featured.length
+      ? freelancerProfile.featured
+      : applicantSnapshot.featured
+    return mapPortfolioEntries(featuredEntries, 'profile')
+  }, [freelancerProfile?.featured, applicantSnapshot.featured])
+
+  const applicationPortfolioItems = useMemo(() => {
+    if (!applicantRecord) return []
+    const samples = mapPortfolioEntries(applicantRecord.samples, 'application')
+    const attachments = mapPortfolioEntries(applicantRecord.attachments, 'application')
+    return [...samples, ...attachments]
+  }, [applicantRecord])
 
   const portfolioPreview = useMemo(() => {
-    if (!applicantRecord) return []
-    const samples = Array.isArray(applicantRecord.samples) ? applicantRecord.samples : []
-    const attachments = Array.isArray(applicantRecord.attachments) ? applicantRecord.attachments : []
-    return [...samples, ...attachments].filter(Boolean).slice(0, 2)
-  }, [applicantRecord])
+    const limit = 2
+    const preview = []
+    if (profilePortfolioItems.length) {
+      preview.push(...profilePortfolioItems.slice(0, limit))
+    }
+    if (preview.length < limit && applicationPortfolioItems.length) {
+      preview.push(...applicationPortfolioItems.slice(0, limit - preview.length))
+    }
+    return preview
+  }, [applicationPortfolioItems, profilePortfolioItems])
+
+  const totalPortfolioItems = profilePortfolioItems.length + applicationPortfolioItems.length
+  const hasAdditionalPortfolioEntries = totalPortfolioItems > portfolioPreview.length
+
+  const profileSummary = (
+    freelancerProfile?.summary || applicantSnapshot.summary || applicantRecord?.summary || ''
+  ).trim()
+  const profileAvailability = (
+    freelancerProfile?.availability || applicantSnapshot.availability || applicantRecord?.availability || ''
+  ).trim()
+
+  const profileLanguages = []
+
+  const hasProfileDetails = Boolean(
+    profileSummary ||
+      profileAvailability ||
+      applicantSkills.length ||
+      profilePortfolioItems.length ||
+      applicationPortfolioItems.length,
+  )
 
   const handleShareInterviewLink = async () => {
     if (!gigId || !applicantId) return
@@ -130,6 +207,7 @@ const ClientApplicantOverview = () => {
         gigId,
         freelancerId: applicantId,
         interviewLink: interviewDraft,
+        interviewSchedule: toIsoFromLocalInput(interviewScheduleDraft),
         updatedBy: user?.uid,
       })
       setNotice({ tone: 'positive', message: 'Interview link shared with the freelancer.' })
@@ -207,6 +285,15 @@ const ClientApplicantOverview = () => {
     }
   }
 
+  const handleOpenProfileModal = () => {
+    if (!hasProfileDetails) return
+    setIsProfileModalOpen(true)
+  }
+
+  const handleCloseProfileModal = () => {
+    setIsProfileModalOpen(false)
+  }
+
   const statusTone = resolveApplicantTone(applicantRecord?.status)
   const relativeUpdate = applicantRecord?.proposalUpdatedAt
     ? formatApplicantRelative(applicantRecord.proposalUpdatedAt)
@@ -217,7 +304,8 @@ const ClientApplicantOverview = () => {
   const showEmpty = recordState.status === 'empty'
 
   return (
-    <div className="client-page applicant-overview-page">
+    <>
+      <div className="client-page applicant-overview-page">
       <button type="button" className="ghost-button" onClick={() => navigate(`/client/manage-gigs/${gigId}/applicants`)}>
         <ArrowLeft size={16} aria-hidden="true" /> Back to applicants
       </button>
@@ -230,9 +318,9 @@ const ClientApplicantOverview = () => {
         </div>
       </header>
 
-      {(notice || (gigStatus === 'error' && gigError)) && (
-        <div className={`gig-applicants-alert is-${notice ? notice.tone : 'negative'}`} role="alert">
-          {notice ? notice.message : gigError?.message}
+      {(gigStatus === 'error' && gigError) && (
+        <div className="gig-applicants-alert is-negative" role="alert">
+          {gigError?.message}
         </div>
       )}
 
@@ -273,22 +361,21 @@ const ClientApplicantOverview = () => {
                 <span className="proposal-review-location">
                   {applicantSnapshot.location || 'Nigeria · Remote friendly'}
                 </span>
-                <div className="proposal-review-meta">
-                  <span>{resolveApplicantLocalTime(applicantRecord)}</span>
-                  <span>{resolveApplicantLanguage(applicantRecord, applicantSnapshot)}</span>
-                  <span>{relativeUpdate}</span>
-                </div>
               </div>
             </div>
             <div className="proposal-review-actions">
-              {applicantSnapshot.portfolioUrl ? (
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleOpenProfileModal}
+                disabled={!hasProfileDetails}
+              >
+                View full profile <ExternalLink size={14} aria-hidden="true" />
+              </button>
+              {applicantSnapshot.portfolioUrl && (
                 <a className="ghost-button" href={applicantSnapshot.portfolioUrl} target="_blank" rel="noreferrer">
-                  View full profile <ExternalLink size={14} aria-hidden="true" />
+                  Open external portfolio <ExternalLink size={14} aria-hidden="true" />
                 </a>
-              ) : (
-                <button type="button" className="ghost-button" disabled>
-                  View full profile
-                </button>
               )}
             </div>
           </header>
@@ -314,32 +401,19 @@ const ClientApplicantOverview = () => {
           <section className="proposal-review-portfolio">
             <div className="proposal-review-portfolio-head">
               <h5>Portfolio preview</h5>
-              {applicantSnapshot.portfolioUrl && (
-                <a className="link-button" href={applicantSnapshot.portfolioUrl} target="_blank" rel="noreferrer">
+              {hasAdditionalPortfolioEntries && (
+                <button type="button" className="link-button" onClick={handleOpenProfileModal}>
                   View all portfolio items
-                </a>
+                </button>
               )}
             </div>
             <div className="proposal-review-portfolio-grid">
               {portfolioPreview.length ? (
                 portfolioPreview.map((item, index) => (
-                  <article className="portfolio-preview-card" key={item.id || item.name || `preview-${index}`}>
-                    <div className="portfolio-preview-media" aria-hidden="true" />
-                    <div>
-                      <strong>{item.name || item.title || 'Project asset'}</strong>
-                      <p>{item.description || item.type || 'Uploaded deliverable'}</p>
-                    </div>
-                    {item.url || item.downloadUrl ? (
-                      <a href={item.url || item.downloadUrl} target="_blank" rel="noreferrer">
-                        Open
-                      </a>
-                    ) : (
-                      <span className="gig-applicant-portfolio-missing">No link provided</span>
-                    )}
-                  </article>
+                  <PortfolioCard item={item} key={item.id || `preview-${index}`} />
                 ))
               ) : (
-                <div className="portfolio-preview-empty">No portfolio attachments yet.</div>
+                <div className="portfolio-preview-empty">No portfolio entries yet.</div>
               )}
             </div>
           </section>
@@ -357,12 +431,24 @@ const ClientApplicantOverview = () => {
                 </a>
               </div>
             )}
+            {applicantRecord.interviewSchedule && (
+              <div className="gig-applicant-interview-heading">
+                <small>Scheduled for:</small>
+                <span>{formatInterviewSchedule(applicantRecord.interviewSchedule)}</span>
+              </div>
+            )}
             <div className="proposal-review-interview-row">
               <input
                 type="url"
                 placeholder="https://meet.google.com/room"
                 value={interviewDraft}
                 onChange={(event) => setInterviewDraft(event.target.value)}
+              />
+              <input
+                type="datetime-local"
+                aria-label="Interview schedule"
+                value={interviewScheduleDraft}
+                onChange={(event) => setInterviewScheduleDraft(event.target.value)}
               />
               <button type="button" onClick={handleShareInterviewLink} disabled={action === 'interview'}>
                 {action === 'interview' ? (
@@ -403,11 +489,212 @@ const ClientApplicantOverview = () => {
           </footer>
         </article>
       ) : null}
-    </div>
+
+      {notice && (
+        <div className={`gig-applicants-alert is-${notice.tone}`} role="alert">
+          {notice.message}
+        </div>
+      )}
+
+      </div>
+
+      {isProfileModalOpen && (
+        <ApplicantProfileModal
+          applicant={freelancerProfile || applicantSnapshot}
+          availability={profileAvailability}
+          externalPortfolioUrl={freelancerProfile?.portfolioUrl || applicantSnapshot.portfolioUrl}
+      
+          onClose={handleCloseProfileModal}
+          portfolioItems={
+            profilePortfolioItems.length
+              ? [...profilePortfolioItems, ...applicationPortfolioItems]
+              : applicationPortfolioItems
+          }
+          skills={applicantSkills}
+          summary={profileSummary}
+        />
+      )}
+    </>
   )
 }
 
 export default ClientApplicantOverview
+
+const toLocalDatetimeInput = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (num) => String(num).padStart(2, '0')
+  const year = date.getFullYear()
+  const month = pad(date.getMonth() + 1)
+  const day = pad(date.getDate())
+  const hours = pad(date.getHours())
+  const minutes = pad(date.getMinutes())
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+const toIsoFromLocalInput = (value) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toISOString()
+}
+
+const formatInterviewSchedule = (value) => {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+const mapPortfolioEntries = (entries, source) => {
+  if (!Array.isArray(entries)) return []
+  return entries
+    .map((item, index) => normalizePortfolioEntry(item, index, source))
+    .filter(Boolean)
+}
+
+const normalizePortfolioEntry = (item, index, source) => {
+  if (!item) return null
+  const tags = Array.isArray(item.tags) ? item.tags.filter(Boolean) : []
+  const media = item.media && typeof item.media === 'object' ? item.media : null
+  const previewUrl = item.previewUrl || media?.previewUrl || media?.url || item.thumbnail || ''
+  const url = item.url || item.projectUrl || item.link || item.downloadUrl || previewUrl || ''
+  const name = item.title || item.name || item.fileName || 'Portfolio project'
+
+  return {
+    id: item.id || media?.id || item.storagePath || `${source}-portfolio-${index}`,
+    title: name,
+    description: item.description || item.type || item.role || 'Uploaded deliverable',
+    url,
+    previewUrl,
+    tags,
+    source,
+  }
+}
+
+const PortfolioCard = ({ item }) => {
+  if (!item) return null
+  const hasPreviewImage = Boolean(item.previewUrl)
+  return (
+    <article className="portfolio-preview-card">
+      <div className={`portfolio-preview-media ${hasPreviewImage ? 'has-media' : ''}`} aria-hidden="true">
+        {hasPreviewImage ? (
+          <img src={item.previewUrl} alt={`${item.title || 'Portfolio asset'} preview`} />
+        ) : (
+          <span>{item.source === 'profile' ? 'Profile asset' : 'Application asset'}</span>
+        )}
+      </div>
+      <div>
+        <strong>{item.title || 'Project asset'}</strong>
+        <p>{item.description || 'Uploaded deliverable'}</p>
+      </div>
+      {item.tags?.length ? (
+        <div className="portfolio-preview-tags">
+          {item.tags.slice(0, 3).map((tag) => (
+            <span key={`${item.id}-${tag}`}>{tag}</span>
+          ))}
+        </div>
+      ) : null}
+      <small className="portfolio-preview-source">
+        {item.source === 'profile' ? 'From freelancer profile' : 'From application'}
+      </small>
+      {item.url ? (
+        <a href={item.url} target="_blank" rel="noreferrer">
+          Open
+        </a>
+      ) : (
+        <span className="gig-applicant-portfolio-missing">No link provided</span>
+      )}
+    </article>
+  )
+}
+
+const ApplicantProfileModal = ({
+  applicant = {},
+  availability,
+  externalPortfolioUrl,
+  
+  onClose,
+  portfolioItems = [],
+  skills = [],
+  summary,
+}) => {
+  const summaryCopy = summary?.trim() || 'This freelancer has not shared a bio yet.'
+  const availabilityCopy = availability || applicant.availability || 'Not shared'
+  const languagesCopy = 'Not shared'
+  const timezoneCopy = applicant.localTimeLabel || 'Not shared'
+  const locationCopy = applicant.location || applicant.state || 'Location not shared'
+
+  return (
+    <div className="applicant-profile-modal" role="dialog" aria-modal="true" aria-label="Freelancer profile">
+      <div className="applicant-profile-modal-backdrop" onClick={onClose} aria-hidden="true" />
+      <div className="applicant-profile-modal-card" role="document">
+        <div className="applicant-profile-modal-head">
+          <div>
+            <p className="eyebrow">Freelancer profile</p>
+            <h3>{applicant.displayName || 'Freelancer'}</h3>
+            <p className="applicant-profile-modal-headline">{applicant.title || 'Independent talent'}</p>
+            <small>{locationCopy}</small>
+          </div>
+          <button type="button" className="applicant-profile-modal-close" onClick={onClose} aria-label="Close profile view">
+            <X size={16} aria-hidden="true" /> Close
+          </button>
+        </div>
+        <section className="applicant-profile-modal-section">
+          <h5>About</h5>
+          <p>{summaryCopy}</p>
+        </section>
+        <section className="applicant-profile-modal-meta">
+          <div>
+            <span>Availability</span>
+            <strong>{availabilityCopy}</strong>
+          </div>
+          {/* Languages removed from profile modal */}
+          <div>
+            <span>Timezone</span>
+            <strong>{timezoneCopy}</strong>
+          </div>
+        </section>
+        <section className="applicant-profile-modal-section">
+          <h5>Skills &amp; Tools</h5>
+          {skills.length ? (
+            <div className="proposal-review-skill-tags">
+              {skills.map((skill) => (
+                <span key={`profile-modal-skill-${skill}`}>{skill}</span>
+              ))}
+            </div>
+          ) : (
+            <p>No skills shared yet.</p>
+          )}
+        </section>
+        <section className="proposal-review-portfolio applicant-profile-modal-section">
+          <div className="proposal-review-portfolio-head">
+            <h5>Portfolio</h5>
+            {externalPortfolioUrl && (
+              <a className="link-button" href={externalPortfolioUrl} target="_blank" rel="noreferrer">
+                Open external portfolio <ExternalLink size={14} aria-hidden="true" />
+              </a>
+            )}
+          </div>
+          <div className="proposal-review-portfolio-grid">
+            {portfolioItems.length ? (
+              portfolioItems.map((item, index) => <PortfolioCard item={item} key={item.id || `full-portfolio-${index}`} />)
+            ) : (
+              <div className="portfolio-preview-empty">No portfolio entries yet.</div>
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  )
+}
 
 const renderCoverLetter = (text) => {
   if (!text) {
